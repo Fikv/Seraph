@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"seraph/internal/store"
@@ -90,11 +91,30 @@ func approvalLabel(a string) string {
 	return sMint.Render("safe")
 }
 
+func clean(s string) string {
+	s = ansi.Strip(s)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if j := strings.LastIndexByte(l, '\r'); j >= 0 {
+			l = l[j+1:]
+		}
+		l = strings.ReplaceAll(l, "\t", "    ")
+		lines[i] = strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+				return -1
+			}
+			return r
+		}, l)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func trunc(s string, w int) string {
 	if w <= 1 {
 		return ""
 	}
-	s = strings.Join(strings.Fields(s), " ")
+	s = strings.Join(strings.Fields(clean(s)), " ")
 	return runewidth.Truncate(s, w, "…")
 }
 
@@ -116,4 +136,49 @@ func modal(title string, body string, width int) string {
 		Padding(1, 2).
 		Width(width).
 		Render(sGoldB.Render(title) + "\n\n" + body)
+}
+
+func splitWidths(total, list int) (int, int) {
+	detail := total - list - 3
+	if detail < 24 {
+		return total, 0
+	}
+	return list, detail
+}
+
+func joinPanels(list, detail string, detailW, h int) string {
+	if detailW == 0 {
+		return list
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, list, divider(h), detail)
+}
+
+func fitLines(lines []string, focus, limit int) []string {
+	if limit <= 0 || len(lines) <= limit {
+		return lines
+	}
+	start := min(max(focus-limit/2, 0), len(lines)-limit)
+	out := append([]string(nil), lines[start:start+limit]...)
+	if start > 0 {
+		out[0] = sFaint.Render("  ⋯")
+	}
+	if start+limit < len(lines) {
+		out[len(out)-1] = sFaint.Render("  ⋯")
+	}
+	return out
+}
+
+func (m *Model) formLimit() int { return m.h - 7 }
+
+func physicalLine(lines []string, k int) int {
+	if k <= 0 {
+		return 0
+	}
+	k = min(k, len(lines))
+	return strings.Count(strings.Join(lines[:k], "\n"), "\n") + 1
+}
+
+func (m *Model) fitForm(lines []string, focusAt int) string {
+	phys := strings.Split(strings.Join(lines, "\n"), "\n")
+	return strings.Join(fitLines(phys, physicalLine(lines, focusAt), m.formLimit()), "\n")
 }

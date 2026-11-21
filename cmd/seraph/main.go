@@ -39,6 +39,11 @@ Usage:
   seraph run [flags] "<task>"    run one worker headless and stream it
   seraph ls                      list sessions
   seraph rm <id>                 remove a session and its worktree (branch kept)
+  seraph project <cmd>           projects: list, add, use, rm (repos + Obsidian notes)
+  seraph todo list|add           the project todo board
+  seraph mcp <cmd>               manage MCP servers (list, search, add, test, rm)
+  seraph redis up|down|status    optional Redis for live sync and caching
+  seraph db                      show the SQLite database
   seraph doctor                  check that agents are installed
   seraph logo [cols] [rows]      print the emblem
 
@@ -98,6 +103,16 @@ func run(args []string) error {
 			return cmdList()
 		case "rm", "remove":
 			return cmdRemove(args[1:])
+		case "mcp":
+			return cmdMCP(args[1:])
+		case "redis":
+			return cmdRedis(args[1:])
+		case "project", "projects":
+			return cmdProject(args[1:])
+		case "todo", "todos":
+			return cmdTodo(args[1:])
+		case "db":
+			return cmdDB()
 		case "doctor":
 			return cmdDoctor()
 		case "logo":
@@ -123,14 +138,6 @@ func run(args []string) error {
 	return cmdTUI(c)
 }
 
-func openManager() (*orch.Manager, error) {
-	st, err := store.Open()
-	if err != nil {
-		return nil, err
-	}
-	return orch.New(st)
-}
-
 func cwdRepo() (dir, repo string, err error) {
 	dir, err = os.Getwd()
 	if err != nil {
@@ -141,24 +148,23 @@ func cwdRepo() (dir, repo string, err error) {
 }
 
 func cmdTUI(c *common) error {
-	mgr, err := openManager()
+	mgr, stg, err := openManager()
 	if err != nil {
 		return err
 	}
+	defer func() { mgr.Close(); stg.close() }()
 	dir, repo, err := cwdRepo()
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	err = tui.Run(mgr, tui.Options{
 		Repo: repo, Dir: dir, Agent: c.agent, Model: c.model,
 		Approval: c.approval(), SkipSplash: c.noSplash, Version: version,
+		Storage: stg.status, Updates: stg.bus.Subscribe(ctx),
 	})
-	running := 0
-	for _, s := range mgr.Sessions() {
-		if mgr.Running(s.ID) {
-			running++
-		}
-	}
+	running := mgr.LocalRunning()
 	if running > 0 {
 		fmt.Println(t.FG(t.Dim).Render(fmt.Sprintf("stopping %d worker(s)…", running)))
 	}
@@ -178,10 +184,11 @@ func cmdRun(args []string) error {
 	if task == "" {
 		return errors.New(`usage: seraph run [-a claude|cursor] "<task>"`)
 	}
-	mgr, err := openManager()
+	mgr, stg, err := openManager()
 	if err != nil {
 		return err
 	}
+	defer func() { mgr.Close(); stg.close() }()
 	dir, repo, err := cwdRepo()
 	if err != nil {
 		return err
@@ -271,10 +278,11 @@ func printEvent(ev agent.Event, agentName string) {
 }
 
 func cmdList() error {
-	mgr, err := openManager()
+	mgr, stg, err := openManager()
 	if err != nil {
 		return err
 	}
+	defer func() { mgr.Close(); stg.close() }()
 	list := mgr.Sessions()
 	if len(list) == 0 {
 		fmt.Println(t.FG(t.Dim).Render("the heavens are quiet: no sessions yet"))
@@ -296,10 +304,11 @@ func cmdRemove(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: seraph rm <id> [id…]")
 	}
-	mgr, err := openManager()
+	mgr, stg, err := openManager()
 	if err != nil {
 		return err
 	}
+	defer func() { mgr.Close(); stg.close() }()
 	for _, id := range args {
 		s, ok := mgr.Get(id)
 		if !ok {

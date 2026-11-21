@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	zone "github.com/lrstanley/bubblezone"
 
 	"seraph/internal/agent"
 	"seraph/internal/store"
@@ -16,21 +18,34 @@ func (m *Model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return ""
 	}
+	m.zoneIDs = m.zoneIDs[:0]
+	return zone.Scan(m.screen())
+}
+
+func (m *Model) screen() string {
 	switch m.scr {
 	case scrSplash:
 		return m.splashView()
 	case scrDetail:
 		return m.detailView()
 	case scrNew:
-		return m.overlay(m.composeView("☩ SUMMON A WORKER", "⏎ summon"))
+		return m.overlay(m.composeView("☩ SUMMON A WORKER", "summon"))
 	case scrPlanGoal:
-		return m.overlay(m.composeView("✦ DIVINE A PLAN", "⏎ plan"))
+		return m.overlay(m.composeView("✦ DIVINE A PLAN", "plan"))
 	case scrPlanning:
 		return m.overlay(m.planningView())
 	case scrPlanReview:
 		return m.overlay(m.reviewView())
 	case scrConfirm:
 		return m.overlay(m.confirmView())
+	case scrMenu:
+		return m.overlay(m.menuView())
+	case scrMCP:
+		return m.mcpView()
+	case scrProjects:
+		return m.projectsView()
+	case scrTodos:
+		return m.todosView()
 	}
 	return m.boardView()
 }
@@ -40,12 +55,18 @@ func (m *Model) overlay(box string) string {
 }
 
 func (m *Model) header() string {
-	left := sGoldB.Render("✧ SERAPH") + "  " + sDim.Render(m.repoText)
+	left := sGoldB.Render("✧ SERAPH") + "  " + m.projectLabel() + "  " + sDim.Render(m.repoText)
 	ls := m.lanes()
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
 		sGold.Render(fmt.Sprintf("✦ %d", len(ls[laneAscended])))
 	right := agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
+	if lipgloss.Width(right) > m.w/2 {
+		right = counts
+	}
+	if room := m.w - lipgloss.Width(right) - 2; lipgloss.Width(left) > room {
+		left = ansi.Truncate(left, max(room, 0), "…")
+	}
 	gap := max(m.w-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
 	return left + strings.Repeat(" ", gap) + right + "\n" + rule(m.w)
 }
@@ -89,8 +110,9 @@ func (m *Model) boardView() string {
 	}
 
 	keys := hints(m.w,
-		key("n", "summon"), key("p", "plan"), key("⏎", "open"), key("r", "resume"),
-		key("x", "stop"), key("d", "release"), key("a", "agent"), key("y", "mode"), key("q", "quit"))
+		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("c", "c", "mcp"),
+		m.chip("r", "r", "resume"), m.chip("x", "x", "stop"), m.chip("d", "d", "release"),
+		m.chip("a", "a", "agent"), m.chip("y", "y", "mode"), m.chip("q", "q", "quit"))
 	return m.header() + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
 }
 
@@ -107,7 +129,7 @@ func (m *Model) laneView(l lane, items []store.Session, w, h int) string {
 	active := l == m.lane
 	color := laneColors[l]
 	name := laneNames[l]
-	head := t.FG(color).Bold(true).Render(name) + sDim.Render(fmt.Sprintf("  %d", len(items)))
+	head := m.mark(fmt.Sprintf("lane:%d", l), t.FG(color).Bold(true).Render(name)+sDim.Render(fmt.Sprintf("  %d", len(items))))
 	underline := t.FG(t.Lerp(color, t.Void, 0.6)).Render(strings.Repeat("━", w))
 	if active {
 		underline = t.FG(color).Render(strings.Repeat("━", w))
@@ -184,16 +206,19 @@ func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) str
 
 	border := lipgloss.RoundedBorder()
 	bc := t.Lerp(laneColor, t.Void, 0.55)
-	if selected {
+	switch {
+	case selected:
 		border = lipgloss.ThickBorder()
 		bc = t.Gold
+	case m.hover == "card:"+s.ID:
+		bc = t.Lavender
 	}
-	return lipgloss.NewStyle().
+	return m.mark("card:"+s.ID, lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(bc.Color()).
 		Padding(0, 1).
-		Width(w - 2).
-		Render(l1 + "\n" + l2 + "\n" + l3)
+		Width(w-2).
+		Render(l1+"\n"+l2+"\n"+l3))
 }
 
 func orDefault(s, d string) string {
@@ -221,7 +246,8 @@ func (m *Model) detailView() string {
 		info3 = sRose.Render("✗ " + trunc(s.Error, m.w-3))
 	}
 
-	keys := hints(m.w, key("⏎", "send"), key("esc", "back"), key("↑↓ pgup pgdn", "scroll"), key("ctrl+x", "stop"), key("ctrl+r", "resume"))
+	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), key("↑↓ wheel", "scroll"),
+		m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
 	return strings.Join([]string{
 		m.header(),
 		lipgloss.NewStyle().MaxWidth(m.w).Render(info1),
@@ -242,6 +268,7 @@ func renderTranscript(evs []agent.Event, agentName string, width int) string {
 	var b strings.Builder
 	var prev agent.Kind
 	for _, ev := range evs {
+		ev.Text = clean(ev.Text)
 		switch ev.Kind {
 		case agent.KindUser:
 			b.WriteString("\n" + sLavender.Bold(true).Render("☩ you") + "\n")
@@ -289,22 +316,22 @@ func renderTranscript(evs []agent.Event, agentName string, width int) string {
 }
 
 func (m *Model) targetLine() string {
-	if m.opt.Repo == "" {
+	if m.spawnRepo() == "" {
 		return sRose.Render("no git repo: workers share " + m.opt.Dir)
 	}
 	return sDim.Render("each worker gets its own worktree off ") + sLavender.Render(m.repoText)
 }
 
 func (m *Model) composeView(title, submit string) string {
-	opts := sDim.Render("agent ") + agentLabel(m.opt.Agent) + sFaint.Render(" tab") +
-		sDim.Render("     mode ") + approvalLabel(string(m.opt.Approval)) + sFaint.Render(" ctrl+y")
+	opts := sDim.Render("agent ") + m.chip("tab", "tab", "") + " " + m.mark("key:tab", agentLabel(m.opt.Agent)) +
+		sDim.Render("     mode ") + m.chip("ctrl+y", "ctrl+y", "") + " " + m.mark("key:ctrl+y", approvalLabel(string(m.opt.Approval)))
 	body := strings.Join([]string{
 		m.ta.View(),
 		"",
 		opts,
 		m.targetLine(),
 		"",
-		hints(m.modalWidth()-4, key(submit, ""), key("alt+⏎", "newline"), key("esc", "cancel")),
+		hints(m.modalWidth()-4, m.chip("enter", "⏎", submit), m.chip("alt+enter", "alt+⏎", "newline"), m.chip("esc", "esc", "cancel")),
 	}, "\n")
 	return modal(title, body, m.modalWidth())
 }
@@ -315,7 +342,7 @@ func (m *Model) planningView() string {
 	body := sGoldB.Render(spin+" the choir deliberates "+spin) + "\n\n" +
 		sDim.Render("planner ") + agentLabel(m.opt.Agent) + sDim.Render(fmt.Sprintf(" · read-only · %s", el)) + "\n\n" +
 		sIvory.Render(trunc(m.planGoal, m.modalWidth()-6)) + "\n\n" +
-		hints(m.modalWidth()-4, key("esc", "cancel"))
+		hints(m.modalWidth()-4, m.chip("esc", "esc", "cancel"))
 	return modal("✦ DIVINING", body, m.modalWidth())
 }
 
@@ -333,9 +360,9 @@ func (m *Model) reviewView() string {
 			box = sFaint.Render("[ ]")
 			title = sFaint.Render(trunc(tk.Title, w-12))
 		}
-		rows = append(rows, cursor+box+" "+agentGlyph(tk.Agent)+" "+title)
 		desc := strings.Join(strings.Fields(tk.Task), " ")
-		rows = append(rows, sDim.Width(w-6).MaxHeight(2).Render(desc))
+		item := cursor + box + " " + agentGlyph(tk.Agent) + " " + title + "\n" + sDim.Width(w-6).MaxHeight(2).Render(desc)
+		rows = append(rows, strings.Split(m.mark(fmt.Sprintf("plan:%d", i), item), "\n")...)
 		rows = append(rows, "")
 	}
 	maxRows := max(m.h-14, 6)
@@ -345,7 +372,8 @@ func (m *Model) reviewView() string {
 	}
 	body := strings.Join(rows, "\n") + "\n" +
 		sDim.Render("mode ") + approvalLabel(string(m.opt.Approval)) + "\n\n" +
-		hints(w, key("⏎", "summon all"), key("space", "toggle"), key("tab", "agent"), key("y", "mode"), key("esc", "discard"))
+		hints(w, m.chip("enter", "⏎", "summon all"), m.chip("t", "t", "to todo board"), m.chip(" ", "space", "toggle"), m.chip("tab", "tab", "agent"),
+			m.chip("y", "y", "mode"), m.chip("esc", "esc", "discard"))
 	return modal(fmt.Sprintf("✦ THE PLAN · %d TASKS", len(m.plan)), body, m.modalWidth())
 }
 
@@ -358,7 +386,7 @@ func (m *Model) confirmView() string {
 	} else {
 		body += sDim.Render("Removes the session record and log. Files are untouched.") + "\n"
 	}
-	body += "\n" + hints(m.modalWidth()-4, key("y", "release"), key("n", "keep"))
+	body += "\n" + hints(m.modalWidth()-4, m.chip("y", "y", "release"), m.chip("n", "n", "keep"))
 	return modal("☩ RELEASE WORKER", body, min(m.modalWidth(), 72))
 }
 

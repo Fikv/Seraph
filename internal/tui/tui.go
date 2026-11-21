@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 
 	"seraph/internal/agent"
 	"seraph/internal/orch"
@@ -30,6 +31,10 @@ const (
 	scrPlanning
 	scrPlanReview
 	scrConfirm
+	scrMenu
+	scrMCP
+	scrProjects
+	scrTodos
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -37,6 +42,8 @@ const continuePrompt = "Continue where you left off and finish the task."
 type tickMsg time.Time
 
 type versionsMsg map[string]string
+
+type busMsg string
 
 type planDoneMsg struct {
 	tasks []orch.PlannedTask
@@ -51,6 +58,8 @@ type Options struct {
 	Approval   agent.Approval
 	SkipSplash bool
 	Version    string
+	Storage    string
+	Updates    <-chan string
 }
 
 type Model struct {
@@ -62,6 +71,7 @@ type Model struct {
 	frame       int
 	splashStart time.Time
 	splashDone  bool
+	lastRefresh time.Time
 	versions    map[string]string
 
 	lane lane
@@ -91,11 +101,36 @@ type Model struct {
 	flashAt  time.Time
 
 	repoText string
+
+	mcp *mcpState
+
+	project      *store.Project
+	projects     []store.Project
+	projSel      int
+	projForm     *projectForm
+	projRemoving string
+	todos        []store.Todo
+	todosAt      time.Time
+	todoCol      int
+	todoIdx      [5]int
+	todoForm     *todoForm
+	todoRemoving string
+	todoSelID    string
+	notesCache   map[string]notesEntry
+	backTo       screen
+
+	hover       string
+	zoneIDs     []string
+	lastClick   string
+	lastClickAt time.Time
 }
 
 func Run(mgr *orch.Manager, opt Options) error {
 	m := newModel(mgr, opt)
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	zone.NewGlobal()
+	defer zone.Close()
+	mgr.StartScheduler(m.defaults())
+	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion()).Run()
 	return err
 }
 
@@ -120,7 +155,9 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 	fi.Placeholder = "follow-up message · enter to send"
 	fi.CharLimit = 8000
 
-	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20), repoText: repoLabel(opt)}
+	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20)}
+	m.loadCurrentProject()
+	m.repoText = m.repoLabel()
 	if opt.SkipSplash {
 		m.scr = scrBoard
 	} else {
@@ -148,15 +185,52 @@ func (m *Model) tickEvery() time.Duration {
 	return 110 * time.Millisecond
 }
 
-func (m *Model) Init() tea.Cmd { return tea.Batch(tick(m.tickEvery()), probeVersions()) }
+func (m *Model) Init() tea.Cmd {
+	return tea.Batch(tick(m.tickEvery()), m.probeVersions(), waitBus(m.opt.Updates))
+}
 
-func probeVersions() tea.Cmd {
+func waitBus(ch <-chan string) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		id, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return busMsg(id)
+	}
+}
+
+type versionCache interface {
+	CacheGet(ctx context.Context, key string) (string, bool)
+	CacheSet(ctx context.Context, key, value string, ttl time.Duration)
+}
+
+func (m *Model) cache() versionCache {
+	if b := m.mgr.Bus(); b != nil {
+		return b
+	}
+	return m.mgr.Store()
+}
+
+func (m *Model) probeVersions() tea.Cmd {
+	c := m.cache()
 	return func() tea.Msg {
 		out := versionsMsg{}
 		for _, name := range agent.Names() {
-			d, _ := agent.Get(name)
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			v, _ := agent.Version(ctx, d)
+			key := "agent:version:" + name
+			if v, ok := c.CacheGet(ctx, key); ok {
+				out[name] = v
+				cancel()
+				continue
+			}
+			d, _ := agent.Get(name)
+			v, err := agent.Version(ctx, d)
+			if err == nil {
+				c.CacheSet(ctx, key, v, time.Hour)
+			}
 			cancel()
 			out[name] = v
 		}
@@ -176,10 +250,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		m.frame++
+		every := time.Second
+		if m.opt.Updates != nil {
+			every = 5 * time.Second
+		}
+		if time.Since(m.lastRefresh) > every {
+			m.mgr.Refresh()
+			m.mgr.SetDefaults(m.defaults())
+			m.lastRefresh = time.Now()
+		}
 		if m.scr == scrDetail {
 			m.refreshDetail(false)
 		}
 		return m, tick(m.tickEvery())
+	case mcpSearchMsg, mcpDoneMsg:
+		return m.mcpMsg(msg)
+	case busMsg:
+		m.mgr.Refresh()
+		m.lastRefresh = time.Now()
+		return m, waitBus(m.opt.Updates)
 	case versionsMsg:
 		m.versions = msg
 		return m, nil
@@ -195,6 +284,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.plan, m.planSel, m.scr = msg.tasks, 0, scrPlanReview
 		return m, nil
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			if m.planCancel != nil {
@@ -220,6 +311,9 @@ func (m *Model) modalWidth() int { return min(max(m.w-6, 30), 96) }
 func (m *Model) lanes() [laneCount][]store.Session {
 	var out [laneCount][]store.Session
 	for _, s := range m.mgr.Sessions() {
+		if m.project != nil && s.ProjectID != m.project.ID {
+			continue
+		}
 		l := laneOf(s)
 		out[l] = append(out[l], s)
 	}
@@ -270,6 +364,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case scrPlanReview:
 		return m.reviewKey(key)
+	case scrMenu:
+		return m.menuKey(key)
+	case scrMCP:
+		return m.mcpKey(k)
+	case scrProjects:
+		return m.projectsKey(k)
+	case scrTodos:
+		return m.todosKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -296,7 +398,7 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 	ls := m.lanes()
 	switch key {
 	case "q":
-		running := len(ls[laneFlight])
+		running := m.mgr.LocalRunning()
 		if running > 0 && !m.quitArmed {
 			m.quitArmed = true
 			m.setFlash(fmt.Sprintf("%d worker(s) still ascending: press q again to stop them and quit", running), true)
@@ -325,8 +427,13 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		m.ta.Reset()
 		m.ta.Placeholder = "describe the task for your worker…"
 		return m, m.ta.Focus()
+	case "g":
+		m.openProjects()
+		return m, nil
+	case "t":
+		return m, m.openTodos()
 	case "p":
-		if m.opt.Repo == "" {
+		if m.spawnRepo() == "" {
 			m.setFlash("planning needs a git repository: run seraph inside one", true)
 			return m, nil
 		}
@@ -334,12 +441,18 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		m.ta.Reset()
 		m.ta.Placeholder = "describe the goal; the planner splits it into parallel workers…"
 		return m, m.ta.Focus()
+	case "m":
+		m.scr = scrMenu
+	case "c":
+		return m, m.openMCP()
+	case "s":
+		m.restartSplash()
 	case "a":
 		m.opt.Agent = agent.Next(m.opt.Agent)
 	case "y":
 		m.toggleApproval()
 	case "x":
-		if s, ok := m.selected(); ok && m.mgr.Running(s.ID) {
+		if s, ok := m.selected(); ok && m.mgr.Active(s.ID) {
 			m.mgr.Stop(s.ID)
 			m.setFlash("stopping "+s.ID, false)
 		}
@@ -409,6 +522,10 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.fi.Blur()
 		m.scr = scrBoard
+		if m.backTo == scrTodos {
+			m.scr, m.backTo = scrTodos, scrBoard
+			m.reloadTodos()
+		}
 		return m, nil
 	case "enter":
 		text := strings.TrimSpace(m.fi.Value())
@@ -470,7 +587,7 @@ func (m *Model) composeKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		id, err := m.mgr.Spawn(orch.SpawnOpts{
 			Task: text, Agent: m.opt.Agent, Model: m.opt.Model,
-			Approval: m.opt.Approval, Repo: m.opt.Repo, Dir: m.opt.Dir,
+			Approval: m.opt.Approval, Repo: m.spawnRepo(), Dir: m.opt.Dir, ProjectID: m.projectID(),
 		})
 		m.scr = scrBoard
 		if err != nil {
@@ -490,7 +607,7 @@ func (m *Model) startPlan(goal string) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.planCancel, m.planGoal, m.planStart = cancel, goal, time.Now()
 	m.scr = scrPlanning
-	mgr, ag, model, repo := m.mgr, m.opt.Agent, m.opt.Model, m.opt.Repo
+	mgr, ag, model, repo := m.mgr, m.opt.Agent, m.opt.Model, m.spawnRepo()
 	return func() tea.Msg {
 		tasks, err := mgr.Plan(ctx, goal, ag, model, repo)
 		return planDoneMsg{tasks: tasks, err: err}
@@ -517,6 +634,24 @@ func (m *Model) reviewKey(key string) (tea.Model, tea.Cmd) {
 		m.plan[m.planSel].Agent = agent.Next(m.plan[m.planSel].Agent)
 	case "ctrl+y", "y":
 		m.toggleApproval()
+	case "t":
+		if m.project == nil {
+			m.setFlash("adding to the todo board needs a project: press g on the board", true)
+			return m, nil
+		}
+		n := 0
+		for _, tk := range m.plan {
+			if tk.Skip {
+				continue
+			}
+			td := store.Todo{ID: store.NewID(), ProjectID: m.project.ID, Title: tk.Title, Body: tk.Task, Agent: tk.Agent, Status: store.TodoOpen, Priority: 1}
+			if m.mgr.Store().SaveTodo(td) == nil {
+				n++
+			}
+		}
+		m.plan = nil
+		m.setFlash(fmt.Sprintf("added %d todo(s) to %s", n, m.project.Name), false)
+		return m, m.openTodos()
 	case "enter":
 		var n int
 		var errs []string
@@ -526,7 +661,7 @@ func (m *Model) reviewKey(key string) (tea.Model, tea.Cmd) {
 			}
 			_, err := m.mgr.Spawn(orch.SpawnOpts{
 				Title: tk.Title, Task: tk.Task, Agent: tk.Agent, Model: modelFor(tk.Agent, m.opt),
-				Approval: m.opt.Approval, Repo: m.opt.Repo, Dir: m.opt.Dir,
+				Approval: m.opt.Approval, Repo: m.spawnRepo(), Dir: m.opt.Dir, ProjectID: m.projectID(),
 			})
 			if err != nil {
 				errs = append(errs, err.Error())
@@ -559,4 +694,12 @@ func repoLabel(opt Options) string {
 	}
 	b := workspace.CurrentBranch(opt.Repo)
 	return filepath.Base(opt.Repo) + " ⎇ " + b
+}
+
+func (m *Model) repoLabel() string {
+	r := m.spawnRepo()
+	if r == "" {
+		return "no repo · " + filepath.Base(m.opt.Dir)
+	}
+	return filepath.Base(r) + " ⎇ " + workspace.CurrentBranch(r)
 }

@@ -40,9 +40,94 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `r` | resume a stopped/failed worker |
 | `x` / `d` | stop / release a worker |
 | `a` / `y` | default agent / approval mode |
+| `g` | projects: switch, create, edit, open notes in Obsidian |
+| `t` | the project todo board |
+| `m` | menu: keycap tiles for every action |
+| `s` | back to the start screen |
+| `c` | MCP servers: browse, install, test, configure |
 | `←→ ↑↓` | move between lanes and cards |
 
+Mouse works everywhere: click cards (click again or double-click to open), lane headers, key chips and menu tiles; the wheel scrolls.
+
 Lanes: **⟡ in flight** (working), **☩ needs you** (failed or stopped), **✦ ascended** (done).
+
+## Projects and the todo board
+
+A **project** groups the repositories you work on and the Obsidian folder that holds their notes:
+
+```sh
+seraph project add DIKO -repo ~/code/diko -repo ~/code/diko-api \
+  -notes "/mnt/c/Users/me/Vault/DIKO" -desc "B2C shop" -agent claude -parallel 2
+seraph project use DIKO        # or press g in the TUI
+```
+
+- The board shows only the current project's workers (`◈` in the header, `g` to switch, `*` for all).
+- Workers start in the project's repo and get the notes folder as an extra directory
+  (`--add-dir`), with an instruction to read the relevant notes before they start.
+- `o` opens the project's notes in Obsidian.
+
+Press `t` for the project's **todo board**: `TODO → QUEUED → DOING → REVIEW → DONE`.
+
+- `n` adds a todo (title, details, repo, agent, priority); `e` edits it.
+- `⏎` processes a todo now: a worker starts on its own branch and the card moves to DOING.
+- `u` queues a todo, `U` queues every open one. The scheduler picks queued todos by priority
+  and never runs more than the project's `parallel` limit at once.
+- When a worker finishes the card moves to REVIEW: `a` accepts it (DONE), `r` retries on the
+  same branch, `<`/`>` move cards by hand, `⏎` opens the worker's transcript.
+- In plan review, `t` sends the planned tasks to the todo board instead of starting them.
+
+```sh
+seraph todo add -prio 2 -queue "Add a /health endpoint"
+seraph todo list
+```
+
+## MCP servers
+
+Press `c` on the board (or pick **C · MCP** in the menu) to manage MCP servers:
+
+- **Browse registry** searches the official MCP Registry. Pick a server, choose how to run it
+  (npm via `npx`, PyPI via `uvx`, Docker, or a remote HTTP/SSE endpoint), fill in the keys it
+  needs, and choose whether Claude, Cursor or both get it.
+- Installing downloads the server, runs a real MCP handshake and lists its tools.
+- **Installed** shows every server with its status and tools: `t` tests again, `1`/`2` toggle
+  Claude/Cursor, `d d` removes it.
+
+Seraph writes servers to Claude's user scope (`claude mcp add-json -s user`) and to
+`~/.cursor/mcp.json`, so workers and your own sessions see the same servers. Its own list lives
+in `~/.seraph/mcp.json` (mode 0600, since it can hold API keys).
+
+The same from the shell:
+
+```sh
+seraph mcp search github
+seraph mcp add io.github.domdomegg/filesystem-mcp
+seraph mcp add <name> -e API_KEY=... -no-cursor
+seraph mcp list | test <name> | rm <name>
+```
+
+## Storage
+
+Everything Seraph knows lives in **SQLite** at `~/.seraph/seraph.db` (WAL mode, file mode 0600):
+sessions, their event logs, MCP servers, settings and a small cache. Older JSON files are
+imported automatically on first start.
+
+Several Seraph processes can share it: a worker started with `seraph run` in one terminal
+shows up live on the board in another. Each process writes a heartbeat for the workers it
+runs; a worker whose process died is marked stopped, and stopping a worker that belongs to
+another process asks that process to stop it.
+
+**Redis is optional.** When enabled it carries live updates between Seraph processes
+(pub/sub instead of polling) and caches registry searches and agent versions:
+
+```sh
+seraph redis up          # start redis:7-alpine in Docker and use it
+seraph redis status      # version, URL, number of Seraph keys
+seraph redis set <url>   # use an existing Redis instead
+seraph redis down        # stop it; Seraph falls back to SQLite only
+seraph db                # database path and counts
+```
+
+`SERAPH_REDIS_URL` overrides the stored setting.
 
 ## How it works
 
@@ -53,8 +138,8 @@ Lanes: **⟡ in flight** (working), **☩ needs you** (failed or stopped), **✦
 - Approval modes: **safe** (Claude `acceptEdits`; Cursor without `--force`)
   and **yolo** (Claude `bypassPermissions`; Cursor `--force`). The planner always
   runs read-only.
-- Sessions and event logs live in `~/.seraph/sessions` (`SERAPH_HOME` to override).
-- Workers are child processes of Seraph: quitting stops them (resume later with `r`).
+- Sessions and event logs live in `~/.seraph/seraph.db` (`SERAPH_HOME` to override).
+- Workers are child processes of the Seraph process that started them: quitting it stops them (resume later with `r`).
 
 ## Emblem
 

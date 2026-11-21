@@ -21,6 +21,12 @@ func (Cursor) Args(s Spec) []string {
 	if s.ResumeID != "" {
 		args = append(args, "--resume", s.ResumeID)
 	}
+	for _, d := range s.AddDirs {
+		args = append(args, "--add-dir", d)
+	}
+	if s.ApproveMCPs {
+		args = append(args, "--approve-mcps")
+	}
 	switch s.Approval {
 	case ApprovalYolo:
 		args = append(args, "--force")
