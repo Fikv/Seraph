@@ -42,8 +42,8 @@ type Event struct {
 type Approval string
 
 const (
-	ApprovalSafe Approval = "safe"
-	ApprovalYolo Approval = "yolo"
+	ApprovalSafe     Approval = "safe"
+	ApprovalYolo     Approval = "yolo"
 	ApprovalReadOnly Approval = "readonly"
 )
 
@@ -102,6 +102,22 @@ func Locate(d Driver) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: %s", ErrNotInstalled, d.Binary())
+}
+
+func Version(ctx context.Context, d Driver) (string, error) {
+	bin, err := Locate(d)
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return "", errors.New("empty version output")
+	}
+	return fields[0], nil
 }
 
 func Run(ctx context.Context, d Driver, spec Spec, emit func(Event)) error {

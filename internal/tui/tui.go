@@ -36,6 +36,8 @@ const continuePrompt = "Continue where you left off and finish the task."
 
 type tickMsg time.Time
 
+type versionsMsg map[string]string
+
 type planDoneMsg struct {
 	tasks []orch.PlannedTask
 	err   error
@@ -48,6 +50,7 @@ type Options struct {
 	Model      string
 	Approval   agent.Approval
 	SkipSplash bool
+	Version    string
 }
 
 type Model struct {
@@ -57,7 +60,9 @@ type Model struct {
 	w, h        int
 	scr         screen
 	frame       int
-	splashUntil time.Time
+	splashStart time.Time
+	splashDone  bool
+	versions    map[string]string
 
 	lane lane
 	idx  [laneCount]int
@@ -120,16 +125,44 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 		m.scr = scrBoard
 	} else {
 		m.scr = scrSplash
-		m.splashUntil = time.Now().Add(2800 * time.Millisecond)
+		m.splashStart = time.Now()
+	}
+	ls := m.lanes()
+	for l := lane(0); l < laneCount; l++ {
+		if len(ls[l]) > 0 {
+			m.lane = l
+			break
+		}
 	}
 	return m
 }
 
-func tick() tea.Cmd {
-	return tea.Tick(110*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
+func tick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-func (m *Model) Init() tea.Cmd { return tick() }
+func (m *Model) tickEvery() time.Duration {
+	if m.scr == scrSplash {
+		return 33 * time.Millisecond
+	}
+	return 110 * time.Millisecond
+}
+
+func (m *Model) Init() tea.Cmd { return tea.Batch(tick(m.tickEvery()), probeVersions()) }
+
+func probeVersions() tea.Cmd {
+	return func() tea.Msg {
+		out := versionsMsg{}
+		for _, name := range agent.Names() {
+			d, _ := agent.Get(name)
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			v, _ := agent.Version(ctx, d)
+			cancel()
+			out[name] = v
+		}
+		return out
+	}
+}
 
 func (m *Model) setFlash(msg string, isErr bool) {
 	m.flash, m.flashErr, m.flashAt = msg, isErr, time.Now()
@@ -143,13 +176,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		m.frame++
-		if m.scr == scrSplash && time.Now().After(m.splashUntil) {
-			m.scr = scrBoard
-		}
 		if m.scr == scrDetail {
 			m.refreshDetail(false)
 		}
-		return m, tick()
+		return m, tick(m.tickEvery())
+	case versionsMsg:
+		m.versions = msg
+		return m, nil
 	case planDoneMsg:
 		if m.scr != scrPlanning {
 			return m, nil
@@ -214,6 +247,10 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch m.scr {
 	case scrSplash:
+		if !m.splashDone {
+			m.splashDone = true
+			return m, nil
+		}
 		m.scr = scrBoard
 		return m, nil
 	case scrBoard:

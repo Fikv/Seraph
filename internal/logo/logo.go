@@ -135,14 +135,20 @@ func sample(gw, gh int) []cell {
 	return grid
 }
 
-func Render(maxCols, maxRows int) string {
+type Art struct {
+	cols, gh int
+	grid     []cell
+	delay    []float64
+}
+
+func Prepare(maxCols, maxRows int) *Art {
 	once.Do(load)
 	if src == nil || maxCols < 6 || maxRows < 3 {
-		return ""
+		return nil
 	}
-	key := fmt.Sprintf("%dx%d", maxCols, maxRows)
+	key := fmt.Sprintf("art:%dx%d", maxCols, maxRows)
 	if v, ok := cache.Load(key); ok {
-		return v.(string)
+		return v.(*Art)
 	}
 	cols := maxCols
 	gh := cols * src.h / src.w
@@ -151,18 +157,55 @@ func Render(maxCols, maxRows int) string {
 		cols = gh * src.w / src.h
 	}
 	if cols < 6 || gh < 4 {
+		return nil
+	}
+	a := &Art{cols: cols, gh: gh, grid: sample(cols, gh), delay: make([]float64, cols*gh)}
+	for y := 0; y < gh; y++ {
+		for x := 0; x < cols; x++ {
+			h := uint32(x*73856093) ^ uint32(y*19349663)
+			h *= 2654435761
+			jitter := float64(h%1000) / 1000
+			a.delay[y*cols+x] = float64(y)/float64(gh)*0.75 + jitter*0.25
+		}
+	}
+	cache.Store(key, a)
+	return a
+}
+
+func (a *Art) Rows(pad int) int { return (a.gh + pad + 1) / 2 }
+
+func (a *Art) Cols() int { return a.cols }
+
+const flash = 0.25
+
+var glow = color.NRGBA{255, 250, 235, 255}
+
+func (a *Art) Frame(progress float64, dy, pad int) string {
+	if a == nil {
 		return ""
 	}
-	grid := sample(cols, gh)
+	h := a.gh + pad
 	at := func(x, y int) cell {
-		if y >= gh {
+		y -= dy
+		if y < 0 || y >= a.gh {
 			return cell{}
 		}
-		return grid[y*cols+x]
+		c := a.grid[y*a.cols+x]
+		if !c.ok {
+			return c
+		}
+		age := progress - a.delay[y*a.cols+x]
+		switch {
+		case age < 0:
+			return cell{}
+		case age < flash:
+			c.c = mix(glow, c.c, age/flash)
+		}
+		return c
 	}
 	var b strings.Builder
-	for y := 0; y < gh; y += 2 {
-		for x := 0; x < cols; x++ {
+	for y := 0; y < h; y += 2 {
+		for x := 0; x < a.cols; x++ {
 			top, bot := at(x, y), at(x, y+1)
 			switch {
 			case top.ok && bot.ok:
@@ -176,11 +219,28 @@ func Render(maxCols, maxRows int) string {
 			}
 		}
 		b.WriteString("\x1b[0m")
-		if y+2 < gh {
+		if y+2 < h {
 			b.WriteByte('\n')
 		}
 	}
-	out := b.String()
+	return b.String()
+}
+
+func mix(a, b color.NRGBA, t float64) color.NRGBA {
+	f := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*t + 0.5) }
+	return color.NRGBA{f(a.R, b.R), f(a.G, b.G), f(a.B, b.B), 255}
+}
+
+func Render(maxCols, maxRows int) string {
+	a := Prepare(maxCols, maxRows)
+	if a == nil {
+		return ""
+	}
+	key := fmt.Sprintf("full:%dx%d", maxCols, maxRows)
+	if v, ok := cache.Load(key); ok {
+		return v.(string)
+	}
+	out := a.Frame(2, 0, 0)
 	cache.Store(key, out)
 	return out
 }

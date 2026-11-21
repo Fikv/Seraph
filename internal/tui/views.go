@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"seraph/internal/agent"
-	"seraph/internal/logo"
 	"seraph/internal/store"
 	t "seraph/internal/theme"
 )
@@ -40,57 +39,15 @@ func (m *Model) overlay(box string) string {
 	return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
 }
 
-func constellation(width, frame, seed int) string {
-	var b strings.Builder
-	glyphs := []string{"·", "✧", "·", "✦", "⋆"}
-	for i := 0; i < width; i++ {
-		h := (i*7919 + seed*104729) % 23
-		if h > 3 {
-			b.WriteByte(' ')
-			continue
-		}
-		c := t.Pulse(t.Faint, t.Gold, frame+i*7+seed*13, 26+h*4)
-		if h == 1 {
-			c = t.Pulse(t.Faint, t.Cyan, frame+i*5, 34)
-		}
-		b.WriteString(t.FG(c).Render(glyphs[(i+seed)%len(glyphs)]))
-	}
-	return b.String()
-}
-
-func (m *Model) splashView() string {
-	phase := float64(m.frame) / 45
-	title := t.Gradient("S   E   R   A   P   H", t.Halo, phase, true)
-	tag := sDim.Render("orchestrate the choir  ") + agentGlyph("claude") + sDim.Render(" claude  ") + agentGlyph("cursor") + sDim.Render(" cursor")
-	hint := t.FG(t.Pulse(t.Faint, t.Ivory, m.frame, 24)).Render("press any key to ascend")
-	starW := min(m.w-4, 56)
-
-	art := logo.Render(min(m.w-4, 72), max(m.h-10, 0))
-	parts := []string{}
-	if art != "" {
-		parts = append(parts, art, "")
-	}
-	parts = append(parts,
-		constellation(starW, m.frame, 1),
-		title,
-		tag,
-		constellation(starW, m.frame, 2),
-		"",
-		hint,
-	)
-	return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center,
-		lipgloss.JoinVertical(lipgloss.Center, parts...))
-}
-
 func (m *Model) header() string {
-	left := t.Gradient("✧ SERAPH", t.Halo, float64(m.frame)/80, true) + "  " + sDim.Render(m.repoText)
+	left := sGoldB.Render("✧ SERAPH") + "  " + sDim.Render(m.repoText)
 	ls := m.lanes()
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
 		sGold.Render(fmt.Sprintf("✦ %d", len(ls[laneAscended])))
 	right := agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
 	gap := max(m.w-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
-	return left + strings.Repeat(" ", gap) + right + "\n" + rule(m.w, float64(m.frame)/140)
+	return left + strings.Repeat(" ", gap) + right + "\n" + rule(m.w)
 }
 
 func (m *Model) flashLine() string {
@@ -138,11 +95,9 @@ func (m *Model) boardView() string {
 }
 
 func (m *Model) emptyView(h int) string {
-	art := logo.Render(min(m.w/3, 34), max(h-7, 0))
 	msg := lipgloss.JoinVertical(lipgloss.Center,
-		art,
+		sGold.Render("✧  the heavens are quiet  ✧"),
 		"",
-		t.Gradient("the heavens are quiet", t.Halo, float64(m.frame)/60, false),
 		sDim.Render("press ")+sGold.Render("n")+sDim.Render(" to summon a worker or ")+sGold.Render("p")+sDim.Render(" to divine a plan"),
 	)
 	return lipgloss.Place(m.w, h, lipgloss.Center, lipgloss.Center, msg)
@@ -155,7 +110,7 @@ func (m *Model) laneView(l lane, items []store.Session, w, h int) string {
 	head := t.FG(color).Bold(true).Render(name) + sDim.Render(fmt.Sprintf("  %d", len(items)))
 	underline := t.FG(t.Lerp(color, t.Void, 0.6)).Render(strings.Repeat("━", w))
 	if active {
-		underline = t.Gradient(strings.Repeat("━", w), []t.RGB{color, t.Ivory, color}, float64(m.frame)/50, false)
+		underline = t.FG(color).Render(strings.Repeat("━", w))
 	}
 	lines := []string{head, underline}
 
@@ -220,7 +175,7 @@ func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) str
 		meta += " · shared dir"
 	}
 	if s.Cost > 0 {
-		meta += fmt.Sprintf(" · $%.2f", s.Cost)
+		meta += " · " + money(s.Cost)
 	}
 	if s.Approval == string(agent.ApprovalYolo) {
 		meta += " · yolo"
@@ -231,7 +186,7 @@ func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) str
 	bc := t.Lerp(laneColor, t.Void, 0.55)
 	if selected {
 		border = lipgloss.ThickBorder()
-		bc = t.Pulse(t.Gold, t.Ivory, m.frame, 22)
+		bc = t.Gold
 	}
 	return lipgloss.NewStyle().
 		Border(border).
@@ -273,7 +228,7 @@ func (m *Model) detailView() string {
 		lipgloss.NewStyle().MaxWidth(m.w).Render(where),
 		info3,
 		m.vp.View(),
-		rule(m.w, float64(m.frame)/140),
+		rule(m.w),
 		m.fi.View(),
 		keys,
 	}, "\n")
@@ -323,6 +278,8 @@ func renderTranscript(evs []agent.Event, agentName string, width int) string {
 			}
 		case agent.KindError:
 			b.WriteString(wrap(sRose, "✗ "+ev.Text) + "\n")
+		case agent.KindSystem:
+			b.WriteString(sMint.Render("  ⎇ "+trunc(ev.Text, w-4)) + "\n")
 		}
 		if ev.Kind != agent.KindInit {
 			prev = ev.Kind
@@ -349,18 +306,17 @@ func (m *Model) composeView(title, submit string) string {
 		"",
 		hints(m.modalWidth()-4, key(submit, ""), key("alt+⏎", "newline"), key("esc", "cancel")),
 	}, "\n")
-	return modal(title, body, m.modalWidth(), m.frame)
+	return modal(title, body, m.modalWidth())
 }
 
 func (m *Model) planningView() string {
 	el := time.Since(m.planStart).Round(time.Second)
 	spin := sparkle[(m.frame/3)%len(sparkle)]
-	body := t.Gradient(spin+" the choir deliberates "+spin, t.Halo, float64(m.frame)/30, true) + "\n\n" +
+	body := sGoldB.Render(spin+" the choir deliberates "+spin) + "\n\n" +
 		sDim.Render("planner ") + agentLabel(m.opt.Agent) + sDim.Render(fmt.Sprintf(" · read-only · %s", el)) + "\n\n" +
 		sIvory.Render(trunc(m.planGoal, m.modalWidth()-6)) + "\n\n" +
-		constellation(m.modalWidth()-6, m.frame, 3) + "\n\n" +
 		hints(m.modalWidth()-4, key("esc", "cancel"))
-	return modal("✦ DIVINING", body, m.modalWidth(), m.frame)
+	return modal("✦ DIVINING", body, m.modalWidth())
 }
 
 func (m *Model) reviewView() string {
@@ -390,7 +346,7 @@ func (m *Model) reviewView() string {
 	body := strings.Join(rows, "\n") + "\n" +
 		sDim.Render("mode ") + approvalLabel(string(m.opt.Approval)) + "\n\n" +
 		hints(w, key("⏎", "summon all"), key("space", "toggle"), key("tab", "agent"), key("y", "mode"), key("esc", "discard"))
-	return modal(fmt.Sprintf("✦ THE PLAN · %d TASKS", len(m.plan)), body, m.modalWidth(), m.frame)
+	return modal(fmt.Sprintf("✦ THE PLAN · %d TASKS", len(m.plan)), body, m.modalWidth())
 }
 
 func (m *Model) confirmView() string {
@@ -403,5 +359,12 @@ func (m *Model) confirmView() string {
 		body += sDim.Render("Removes the session record and log. Files are untouched.") + "\n"
 	}
 	body += "\n" + hints(m.modalWidth()-4, key("y", "release"), key("n", "keep"))
-	return modal("☩ RELEASE WORKER", body, min(m.modalWidth(), 72), m.frame)
+	return modal("☩ RELEASE WORKER", body, min(m.modalWidth(), 72))
+}
+
+func money(c float64) string {
+	if c < 1 {
+		return fmt.Sprintf("$%.3f", c)
+	}
+	return fmt.Sprintf("$%.2f", c)
 }

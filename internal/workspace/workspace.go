@@ -55,6 +55,19 @@ func Remove(repo, dir string) error {
 	return err
 }
 
+func CommitAll(dir, msg string) (string, error) {
+	if _, err := git(dir, "add", "-A"); err != nil {
+		return "", err
+	}
+	if _, err := git(dir, "diff", "--cached", "--quiet"); err == nil {
+		return "", nil
+	}
+	if _, err := git(dir, "commit", "-q", "-m", msg); err != nil {
+		return "", err
+	}
+	return git(dir, "rev-parse", "--short", "HEAD")
+}
+
 func Summary(dir, base string) string {
 	var parts []string
 	if st, err := git(dir, "status", "--short"); err == nil && st != "" {

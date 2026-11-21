@@ -4,6 +4,8 @@ import "encoding/json"
 
 type Claude struct{}
 
+const noAttribution = `{"includeCoAuthoredBy":false,"attribution":{"commit":"","pr":""}}`
+
 func (Claude) Name() string   { return "claude" }
 func (Claude) Binary() string { return "claude" }
 
@@ -23,6 +25,7 @@ func (Claude) Args(s Spec) []string {
 	default:
 		args = append(args, "--permission-mode", "acceptEdits")
 	}
+	args = append(args, "--settings", noAttribution)
 	if s.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", s.SystemPrompt)
 	}

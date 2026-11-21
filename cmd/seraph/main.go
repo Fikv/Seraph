@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,7 +31,7 @@ func main() {
 }
 
 func usage() {
-	title := t.Gradient("✧ SERAPH", t.Halo, 0, true)
+	title := t.FG(t.Gold).Bold(true).Render("✧ SERAPH")
 	fmt.Printf(`%s  %s
 
 Usage:
@@ -39,7 +40,7 @@ Usage:
   seraph ls                      list sessions
   seraph rm <id>                 remove a session and its worktree (branch kept)
   seraph doctor                  check that agents are installed
-  seraph logo                    print the emblem
+  seraph logo [cols] [rows]      print the emblem
 
 Flags (seraph and seraph run):
   -a, -agent string   claude | cursor (default "claude", env SERAPH_AGENT)
@@ -53,8 +54,8 @@ State lives in %s (override with SERAPH_HOME).
 }
 
 type common struct {
-	agent, model                  string
-	yolo, noWorktree, noSplash    bool
+	agent, model               string
+	yolo, noWorktree, noSplash bool
 }
 
 func parseFlags(name string, args []string) (*common, []string, error) {
@@ -100,8 +101,7 @@ func run(args []string) error {
 		case "doctor":
 			return cmdDoctor()
 		case "logo":
-			fmt.Println(logo.Render(64, 32))
-			return nil
+			return cmdLogo(args[1:])
 		case "version", "--version", "-v":
 			fmt.Println("seraph", version)
 			return nil
@@ -151,7 +151,7 @@ func cmdTUI(c *common) error {
 	}
 	err = tui.Run(mgr, tui.Options{
 		Repo: repo, Dir: dir, Agent: c.agent, Model: c.model,
-		Approval: c.approval(), SkipSplash: c.noSplash,
+		Approval: c.approval(), SkipSplash: c.noSplash, Version: version,
 	})
 	running := 0
 	for _, s := range mgr.Sessions() {
@@ -196,7 +196,7 @@ func cmdRun(args []string) error {
 		return err
 	}
 	s, _ := mgr.Get(id)
-	fmt.Println(t.Gradient("✧ SERAPH", t.Halo, 0, true) + t.FG(t.Dim).Render(" summoned ") + t.FG(t.Ivory).Render(id) +
+	fmt.Println(t.FG(t.Gold).Bold(true).Render("✧ SERAPH") + t.FG(t.Dim).Render(" summoned ") + t.FG(t.Ivory).Render(id) +
 		t.FG(t.Dim).Render(" · "+c.agent+" · "+orDefault(s.Branch, "shared dir")))
 	if s.Worktree {
 		fmt.Println(t.FG(t.Faint).Render("  " + s.Dir))
@@ -249,7 +249,10 @@ func cmdRun(args []string) error {
 func printEvent(ev agent.Event, agentName string) {
 	switch ev.Kind {
 	case agent.KindText:
-		fmt.Println(t.FG(t.Gold).Bold(true).Render("✧ "+agentName) + "\n" + t.FG(t.Ivory).Render(ev.Text))
+		fmt.Println(t.FG(t.Gold).Bold(true).Render("✧ " + agentName))
+		for _, line := range strings.Split(strings.TrimRight(ev.Text, "\n"), "\n") {
+			fmt.Println(t.FG(t.Ivory).Render(line))
+		}
 	case agent.KindToolStart:
 		fmt.Println(t.FG(t.Cyan).Render("  ⟢ "+ev.Tool) + " " + t.FG(t.Dim).Render(ev.Text))
 	case agent.KindToolEnd:
@@ -262,6 +265,8 @@ func printEvent(ev agent.Event, agentName string) {
 		}
 	case agent.KindError:
 		fmt.Println(t.FG(t.Rose).Render("✗ " + ev.Text))
+	case agent.KindSystem:
+		fmt.Println(t.FG(t.Mint).Render("  ⎇ " + ev.Text))
 	}
 }
 
@@ -335,6 +340,26 @@ func cmdDoctor() error {
 	if !ok {
 		return errors.New("some agents are missing")
 	}
+	return nil
+}
+
+func cmdLogo(args []string) error {
+	cols, rows := 64, 32
+	if len(args) > 0 {
+		n, err := strconv.Atoi(args[0])
+		if err != nil || n < 6 {
+			return errors.New("usage: seraph logo [cols] [rows]")
+		}
+		cols, rows = n, n/2
+	}
+	if len(args) > 1 {
+		n, err := strconv.Atoi(args[1])
+		if err != nil || n < 3 {
+			return errors.New("usage: seraph logo [cols] [rows]")
+		}
+		rows = n
+	}
+	fmt.Println(logo.Render(cols, rows))
 	return nil
 }
 

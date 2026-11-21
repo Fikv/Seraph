@@ -19,7 +19,8 @@ import (
 const workerPrompt = `You are a Seraph worker, one of several coding agents working in parallel.
 You run in an isolated git worktree on branch %s; other workers handle other tasks on their own branches.
 Complete the task fully and stay within its scope. Run the project's relevant checks when you can.
-When finished, commit your work on this branch with a clear message, then end with a short summary of what changed.`
+Do not run git add, git commit or git push: Seraph commits your changes on this branch when you finish.
+End with a short summary of what changed.`
 
 const plannerPrompt = `You are the Seraph orchestrator. Split the goal below into 1-5 independent tasks that separate coding agents can do in parallel, each in its own git worktree branched from the current HEAD.
 Explore the repository briefly (read-only) so the tasks fit the code. Avoid tasks that edit the same files. Every task must be self-contained: the worker sees only its own task text.
@@ -43,8 +44,8 @@ type SpawnOpts struct {
 	Agent    string
 	Model    string
 	Approval agent.Approval
-	Repo string
-	Dir  string
+	Repo     string
+	Dir      string
 }
 
 type Manager struct {
@@ -279,6 +280,9 @@ func (m *Manager) start(id, prompt, resume string) {
 			}
 			m.record(id, ev)
 		})
+		if err == nil && !resultErr && snapshot.Worktree {
+			m.commit(id, snapshot, prompt)
+		}
 
 		m.mu.Lock()
 		delete(m.cancels, id)
@@ -309,6 +313,24 @@ func (m *Manager) start(id, prompt, resume string) {
 			m.record(id, agent.Event{Kind: agent.KindError, Text: err.Error(), Time: time.Now()})
 		}
 	}()
+}
+
+func (m *Manager) commit(id string, s store.Session, prompt string) {
+	subject, body := s.Title, s.Task
+	if s.Turns > 1 {
+		subject, body = titleFrom(prompt), prompt
+	}
+	msg := subject
+	if b := strings.TrimSpace(body); b != "" && b != strings.TrimSpace(subject) {
+		msg += "\n\n" + b
+	}
+	sha, err := workspace.CommitAll(s.Dir, msg)
+	switch {
+	case err != nil:
+		m.record(id, agent.Event{Kind: agent.KindError, Text: "commit failed: " + err.Error(), Time: time.Now()})
+	case sha != "":
+		m.record(id, agent.Event{Kind: agent.KindSystem, Text: "committed " + sha + " on " + s.Branch, Time: time.Now()})
+	}
 }
 
 func (m *Manager) record(id string, ev agent.Event) {
@@ -435,9 +457,11 @@ func firstLine(s string) string {
 func lastNonEmpty(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		if l := strings.TrimSpace(lines[i]); l != "" {
-			return l
+		l := strings.TrimSpace(lines[i])
+		if l == "" || strings.HasPrefix(l, "```") || strings.Trim(l, "-*_=#") == "" {
+			continue
 		}
+		return l
 	}
 	return ""
 }

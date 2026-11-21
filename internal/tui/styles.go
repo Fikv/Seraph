@@ -102,20 +102,18 @@ func key(k, desc string) string {
 	return sGold.Render(k) + " " + sDim.Render(desc)
 }
 
-func rule(width int, phase float64) string {
+func rule(width int) string {
 	if width <= 0 {
 		return ""
 	}
-	return t.Gradient(strings.Repeat("─", width), t.Dawn, phase, false)
+	return sFaint.Render(strings.Repeat("─", width))
 }
 
-func modal(title string, body string, width int, frame int) string {
-	border := t.Pulse(t.DeepGold, t.Cyan, frame, 40)
-	head := t.Gradient(title, t.Halo, float64(frame)/60, true)
+func modal(title string, body string, width int) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(border.Color()).
+		BorderForeground(t.DeepGold.Color()).
 		Padding(1, 2).
 		Width(width).
-		Render(head + "\n\n" + body)
+		Render(sGoldB.Render(title) + "\n\n" + body)
 }
