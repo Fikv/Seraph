@@ -131,6 +131,7 @@ func (m *Model) panelLines() []string {
 		row("agents", strings.Join(agents, "   ")),
 		row("default", agentLabel(m.opt.Agent)+sDim.Render(" · ")+approvalLabel(string(m.opt.Approval))),
 		row("sessions", sessions),
+		row("storage", m.storageLine()),
 		row("state", sDim.Render(trunc(tildeHome(store.Home()), panelWidth-10))),
 		divider,
 	}
@@ -281,4 +282,15 @@ func (m *Model) splashView() string {
 	}
 	place(canvas, strings.Join(panel, "\n"), max(1, (m.w-panelWidth-10)/2), y, m.w)
 	return strings.Join(canvas, "\n")
+}
+
+func (m *Model) storageLine() string {
+	redis := sFaint.Render("redis off")
+	switch m.opt.Storage {
+	case "on":
+		redis = sMint.Render("redis ✓ live")
+	case "unreachable":
+		redis = sRose.Render("redis ✗ unreachable")
+	}
+	return sIvory.Render("sqlite") + sFaint.Render(" · ") + redis
 }

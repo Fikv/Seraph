@@ -73,6 +73,30 @@ seraph mcp add <name> -e API_KEY=... -no-cursor
 seraph mcp list | test <name> | rm <name>
 ```
 
+## Storage
+
+Everything Seraph knows lives in **SQLite** at `~/.seraph/seraph.db` (WAL mode, file mode 0600):
+sessions, their event logs, MCP servers, settings and a small cache. Older JSON files are
+imported automatically on first start.
+
+Several Seraph processes can share it: a worker started with `seraph run` in one terminal
+shows up live on the board in another. Each process writes a heartbeat for the workers it
+runs; a worker whose process died is marked stopped, and stopping a worker that belongs to
+another process asks that process to stop it.
+
+**Redis is optional.** When enabled it carries live updates between Seraph processes
+(pub/sub instead of polling) and caches registry searches and agent versions:
+
+```sh
+seraph redis up          # start redis:7-alpine in Docker and use it
+seraph redis status      # version, URL, number of Seraph keys
+seraph redis set <url>   # use an existing Redis instead
+seraph redis down        # stop it; Seraph falls back to SQLite only
+seraph db                # database path and counts
+```
+
+`SERAPH_REDIS_URL` overrides the stored setting.
+
 ## How it works
 
 - Each worker gets a worktree at `~/.seraph/worktrees/<repo>-<hash>/<id>` on
@@ -82,8 +106,8 @@ seraph mcp list | test <name> | rm <name>
 - Approval modes: **safe** (Claude `acceptEdits`; Cursor without `--force`)
   and **yolo** (Claude `bypassPermissions`; Cursor `--force`). The planner always
   runs read-only.
-- Sessions and event logs live in `~/.seraph/sessions` (`SERAPH_HOME` to override).
-- Workers are child processes of Seraph: quitting stops them (resume later with `r`).
+- Sessions and event logs live in `~/.seraph/seraph.db` (`SERAPH_HOME` to override).
+- Workers are child processes of the Seraph process that started them: quitting it stops them (resume later with `r`).
 
 ## Emblem
 

@@ -39,12 +39,12 @@ func testModel(t *testing.T) *Model {
 		if err := st.Save(s); err != nil {
 			t.Fatal(err)
 		}
-		_ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindUser, Text: "do the thing " + strings.Repeat("word ", 40)})
-		_ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindToolStart, Tool: "Bash", Text: strings.Repeat("x", 300)})
-		_ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindText, Text: "done\n\n```go\nfunc main() {\n\tif x {\n\t\treturn\t// " + strings.Repeat("comment ", 9) + "\n\t}\n}\n```\r\nprogress 50%\rprogress 100%\n" + strings.Repeat("long line ", 50)})
-		_ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindResult, Cost: 0.01})
+		_, _ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindUser, Text: "do the thing " + strings.Repeat("word ", 40)})
+		_, _ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindToolStart, Tool: "Bash", Text: strings.Repeat("x", 300)})
+		_, _ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindText, Text: "done\n\n```go\nfunc main() {\n\tif x {\n\t\treturn\t// " + strings.Repeat("comment ", 9) + "\n\t}\n}\n```\r\nprogress 50%\rprogress 100%\n" + strings.Repeat("long line ", 50)})
+		_, _ = st.AppendLog(s.ID, agent.Event{Kind: agent.KindResult, Cost: 0.01})
 	}
-	mgr, err := orch.New(st)
+	mgr, err := orch.New(st, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
