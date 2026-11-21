@@ -32,6 +32,7 @@ const (
 	scrPlanReview
 	scrConfirm
 	scrMenu
+	scrMCP
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -93,6 +94,8 @@ type Model struct {
 	flashAt  time.Time
 
 	repoText string
+
+	mcp *mcpState
 
 	hover       string
 	zoneIDs     []string
@@ -189,6 +192,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshDetail(false)
 		}
 		return m, tick(m.tickEvery())
+	case mcpSearchMsg, mcpDoneMsg:
+		return m.mcpMsg(msg)
 	case versionsMsg:
 		m.versions = msg
 		return m, nil
@@ -283,6 +288,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.reviewKey(key)
 	case scrMenu:
 		return m.menuKey(key)
+	case scrMCP:
+		return m.mcpKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -349,6 +356,8 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		return m, m.ta.Focus()
 	case "m":
 		m.scr = scrMenu
+	case "c":
+		return m, m.openMCP()
 	case "s":
 		m.restartSplash()
 	case "a":

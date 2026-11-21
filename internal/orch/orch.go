@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"seraph/internal/agent"
+	"seraph/internal/mcp"
 	"seraph/internal/store"
 	"seraph/internal/workspace"
 )
@@ -267,6 +268,9 @@ func (m *Manager) start(id, prompt, resume string) {
 		ResumeID:     resume,
 		Approval:     agent.Approval(snapshot.Approval),
 		SystemPrompt: fmt.Sprintf(workerPrompt, branchOr(snapshot.Branch)),
+	}
+	if cfg, err := mcp.Load(); err == nil {
+		spec.ApproveMCPs = cfg.AnyCursor()
 	}
 
 	m.wg.Add(1)

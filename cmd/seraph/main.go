@@ -39,6 +39,7 @@ Usage:
   seraph run [flags] "<task>"    run one worker headless and stream it
   seraph ls                      list sessions
   seraph rm <id>                 remove a session and its worktree (branch kept)
+  seraph mcp <cmd>               manage MCP servers (list, search, add, test, rm)
   seraph doctor                  check that agents are installed
   seraph logo [cols] [rows]      print the emblem
 
@@ -98,6 +99,8 @@ func run(args []string) error {
 			return cmdList()
 		case "rm", "remove":
 			return cmdRemove(args[1:])
+		case "mcp":
+			return cmdMCP(args[1:])
 		case "doctor":
 			return cmdDoctor()
 		case "logo":
