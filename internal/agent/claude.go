@@ -20,7 +20,7 @@ func (Claude) Args(s Spec) []string {
 	switch s.Approval {
 	case ApprovalYolo:
 		args = append(args, "--permission-mode", "bypassPermissions")
-	case ApprovalReadOnly:
+	case ApprovalReadOnly, ApprovalAsk:
 		args = append(args, "--allowedTools", "Read,Grep,Glob")
 	default:
 		args = append(args, "--permission-mode", "acceptEdits")

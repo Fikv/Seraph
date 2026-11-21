@@ -45,6 +45,7 @@ const (
 	ApprovalSafe     Approval = "safe"
 	ApprovalYolo     Approval = "yolo"
 	ApprovalReadOnly Approval = "readonly"
+	ApprovalAsk      Approval = "ask"
 )
 
 type Spec struct {

@@ -32,6 +32,8 @@ func (Cursor) Args(s Spec) []string {
 		args = append(args, "--force")
 	case ApprovalReadOnly:
 		args = append(args, "--mode", "plan")
+	case ApprovalAsk:
+		args = append(args, "--mode", "ask")
 	}
 	prompt := s.Prompt
 	if s.SystemPrompt != "" {

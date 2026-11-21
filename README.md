@@ -45,6 +45,8 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `m` | menu: keycap tiles for every action |
 | `s` | back to the start screen |
 | `c` | MCP servers: browse, install, test, configure |
+| `o` | notes: browse and read the project markdown |
+| `v` | diff of the selected worker; `?` asks the agent about a hunk |
 | `←→ ↑↓` | move between lanes and cards |
 
 Mouse works everywhere: click cards (click again or double-click to open), lane headers, key chips and menu tiles; the wheel scrolls.
@@ -64,7 +66,7 @@ seraph project use DIKO        # or press g in the TUI
 - The board shows only the current project's workers (`◈` in the header, `g` to switch, `*` for all).
 - Workers start in the project's repo and get the notes folder as an extra directory
   (`--add-dir`), with an instruction to read the relevant notes before they start.
-- `o` opens the project's notes in Obsidian.
+- On the projects screen (`g`), `o` opens the notes folder in Obsidian; `o` on the board opens the notes browser.
 
 Press `t` for the project's **todo board**: `TODO → QUEUED → DOING → REVIEW → DONE`.
 
@@ -80,6 +82,26 @@ Press `t` for the project's **todo board**: `TODO → QUEUED → DOING → REVIE
 seraph todo add -prio 2 -queue "Add a /health endpoint"
 seraph todo list
 ```
+
+## Notes and diffs
+
+**Notes (`o`)**: browse the markdown of the current project: its Obsidian notes folder and the
+`.md` files in its repositories (README, docs). The list filters as you type (`/`); the preview
+renders markdown in Seraph's colours, hides frontmatter (tags show in the header), turns
+`[[wikilinks]]` into bold labels and lets you follow them (`l`). `o` opens the note in Obsidian.
+Folders exported by graphify are skipped.
+
+Agent replies in the session transcript are rendered as markdown too.
+
+**Diff (`v` on the board or todo board, `ctrl+g` in a session)**: everything a worker changed
+since its branch left the base: changed files with `+/-` counts, coloured hunks with line numbers,
+the worker's commits and untracked files. If the worktree was released, the diff comes from the
+branch.
+
+**Ask the agent about a change**: `?` on a hunk (or `a` for the whole file) sends your question,
+with the hunk attached, to the worker's own conversation. It runs **read-only** (Claude: read
+tools only; Cursor: `--mode ask`) and **nothing is committed**; the session keeps its status. The
+answer streams into the transcript and `esc` takes you back to the diff.
 
 ## MCP servers
 

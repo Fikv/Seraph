@@ -2,6 +2,7 @@ package orch
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,7 @@ func (f fakeDriver) Args(s agent.Spec) []string {
 	script := `echo '{"type":"system","subtype":"init","session_id":"fake-1"}'
 sleep ` + f.sleep + `
 echo "$SERAPH_TEST_NOTE" > work.txt
-echo '{"type":"assistant","message":{"content":[{"type":"text","text":"dirs ` + strings.ReplaceAll(string(dirs), `"`, `\"`) + `"}]}}'
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"dirs ` + strings.ReplaceAll(string(dirs), `"`, `\"`) + ` approval ` + string(s.Approval) + ` explain ` + fmt.Sprint(strings.Contains(s.SystemPrompt, "answering the user")) + `"}]}}'
 echo '{"type":"result","is_error":false,"result":"ok","total_cost_usd":0.01}'`
 	return []string{"-c", script}
 }
@@ -139,5 +140,63 @@ func TestProjectRepoPicksCwd(t *testing.T) {
 	}
 	if got := ProjectRepo(p, "/elsewhere"); got != "/a/one" {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func TestAskIsReadOnly(t *testing.T) {
+	t.Setenv("SERAPH_HOME", t.TempDir())
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
+		t.Setenv(k, "t")
+	}
+	for _, k := range []string{"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(k, "t@t")
+	}
+	t.Setenv("SERAPH_TEST_NOTE", "first")
+	agent.Register("fake", fakeDriver{sleep: "0.1"})
+	st, _ := store.Open()
+	defer st.Close()
+	m, _ := New(st, nil)
+	defer m.Close()
+	repo := gitRepo(t)
+	st.SaveProject(store.Project{ID: "p", Name: "P", Repos: []string{repo}, MaxParallel: 1})
+	st.SaveTodo(store.Todo{ID: "td", ProjectID: "p", Title: "do it", Status: store.TodoOpen})
+	id, err := m.Dispatch("td", Defaults{Agent: "fake", Approval: agent.ApprovalSafe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "review", func() bool { x, _, _ := st.Todo("td"); return x.Status == store.TodoReview })
+	s, _ := m.Get(id)
+	head := func() string {
+		out, _ := exec.Command("git", "-C", s.Dir, "rev-parse", "HEAD").Output()
+		return strings.TrimSpace(string(out))
+	}
+	before := head()
+
+	t.Setenv("SERAPH_TEST_NOTE", "changed-during-ask")
+	if err := m.Ask(id, "why this?", "work.txt", "@@ -0,0 +1 @@\n+first"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "ask to finish", func() bool { return !m.Running(id) })
+	m.Wait()
+	if head() != before {
+		t.Fatal("ask must not commit")
+	}
+	if s2, _ := m.Get(id); s2.Status != store.StatusDone {
+		t.Fatalf("status should be restored to done, got %s", s2.Status)
+	}
+	if td, _, _ := st.Todo("td"); td.Status != store.TodoReview {
+		t.Fatalf("ask must not move the todo, got %s", td.Status)
+	}
+	evs, _ := m.Log(id)
+	var sawQuestion, sawMode bool
+	for _, ev := range evs {
+		sawQuestion = sawQuestion || (ev.Kind == agent.KindUser && strings.Contains(ev.Text, "why this?") && strings.Contains(ev.Text, "```diff"))
+		sawMode = sawMode || strings.Contains(ev.Text, "approval ask explain true")
+	}
+	if !sawQuestion || !sawMode {
+		t.Fatalf("question=%v askMode=%v", sawQuestion, sawMode)
+	}
+	if err := m.Ask("nope", "", "", ""); err == nil {
+		t.Fatal("unknown session must fail")
 	}
 }

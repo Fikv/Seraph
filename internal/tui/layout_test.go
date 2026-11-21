@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"seraph/internal/mcp"
 	"seraph/internal/orch"
 	"seraph/internal/store"
+	"seraph/internal/workspace"
 )
 
 func testModel(t *testing.T) *Model {
@@ -98,6 +100,26 @@ func testModel(t *testing.T) *Model {
 		}
 	}
 	m.loadProjects()
+
+	wt, branch, err := workspace.Create(t.TempDir(), repo, "dfx001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(wt, "main.go"), []byte("package main\n\nfunc main() {\n\tprintln(\""+strings.Repeat("very long line ", 20)+"\")\n}\n"), 0o644)
+	os.MkdirAll(filepath.Join(wt, strings.Repeat("deep/", 8)), 0o755)
+	os.WriteFile(filepath.Join(wt, strings.Repeat("deep/", 8)+"x.md"), []byte("# deep\n"), 0o644)
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@t")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@t")
+	if _, err := workspace.CommitAll(wt, "worker change"); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(wt, "untracked.txt"), []byte("x"), 0o644)
+	st.Save(store.Session{ID: "dfx001", Title: "diff session " + strings.Repeat("title ", 10), Task: "t", Agent: "cursor", Status: store.StatusDone,
+		Repo: repo, Dir: wt, Branch: branch, Base: "main", Worktree: true, CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	os.WriteFile(filepath.Join(notes, "Links.md"), []byte("---\ntags: [a, b]\n---\n# Links\n\nSee [[Architecture]] and [[Missing|alias]].\n\n```go\nfunc x() {}\n```\n"+strings.Repeat("long paragraph text ", 60)), 0o644)
+	m.mgr.Refresh()
 	return m
 }
 
@@ -149,9 +171,24 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.err = strings.Repeat("err ", 40)
 		},
 		"board-project": func(m *Model) { p := m.projects[0]; m.useProject(&p); m.scr = scrBoard },
+		"notes": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openNotesBrowser()
+			m.followLink("Links")
+		},
+		"notes-links": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openNotesBrowser()
+			m.followLink("Links")
+			m.notes.linkPick = true
+		},
+		"diff":     func(m *Model) { m.openDiff("dfx001", scrBoard); m.diff.focus = 1 },
+		"diff-ask": func(m *Model) { m.openDiff("dfx001", scrBoard); m.startAsk(false) },
 	}
-	if len(screens) != 18 {
-		t.Fatalf("expected 18 screens under test, got %d", len(screens))
+	if len(screens) != 22 {
+		t.Fatalf("expected 22 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -180,9 +217,12 @@ func TestLayoutFitsTerminal(t *testing.T) {
 func gitRepoForTest(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command("git", "init", "-q", "-b", "main", dir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, out)
+	for _, args := range [][]string{{"init", "-q", "-b", "main", dir}, {"-C", dir, "commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
 	}
 	return dir
 }
@@ -204,5 +244,44 @@ func TestTodoSelectionFollowsCard(t *testing.T) {
 	m.reloadTodos()
 	if sel, ok := m.selectedTodo(); !ok || sel.ID != "t20" || m.todoCol != 3 {
 		t.Fatalf("selection should follow t20 into REVIEW, got %+v col=%d", sel, m.todoCol)
+	}
+}
+
+func TestNotesAndDiffContent(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
+	p := m.projects[0]
+	m.useProject(&p)
+	m.openNotesBrowser()
+	m.followLink("Links")
+	if f, _ := m.currentNote(); filepath.Base(f.Rel) != "Links" {
+		t.Fatalf("followLink opened %q", f.Rel)
+	}
+	if !reflect.DeepEqual(m.notes.links, []string{"Architecture", "Missing"}) || !reflect.DeepEqual(m.notes.tags, []string{"a", "b"}) {
+		t.Fatalf("links=%v tags=%v", m.notes.links, m.notes.tags)
+	}
+	m.followLink("Architecture")
+	if f, _ := m.currentNote(); filepath.Base(f.Rel) != "Architecture" {
+		t.Fatalf("wikilink not followed: %q", f.Rel)
+	}
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "Architecture") {
+		t.Fatal("preview missing")
+	}
+
+	m.openDiff("dfx001", scrBoard)
+	if len(m.diff.res.Files) != 2 || len(m.diff.res.Commits) != 1 || len(m.diff.res.Untracked) != 1 || m.diff.err != "" {
+		t.Fatalf("diff = %+v err=%s", m.diff.res, m.diff.err)
+	}
+	for i, f := range m.diff.res.Files {
+		if f.Path == "main.go" {
+			m.diff.fileSel = i
+		}
+	}
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"worker change", "main.go", "+package main", "1 untracked"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff view missing %q", want)
+		}
 	}
 }

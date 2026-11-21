@@ -35,6 +35,8 @@ const (
 	scrMCP
 	scrProjects
 	scrTodos
+	scrNotes
+	scrDiff
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -118,6 +120,8 @@ type Model struct {
 	todoSelID    string
 	notesCache   map[string]notesEntry
 	backTo       screen
+	notes        *notesState
+	diff         *diffState
 
 	hover       string
 	zoneIDs     []string
@@ -372,6 +376,10 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.projectsKey(k)
 	case scrTodos:
 		return m.todosKey(k)
+	case scrNotes:
+		return m.notesKey(k)
+	case scrDiff:
+		return m.diffKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -443,6 +451,12 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		return m, m.ta.Focus()
 	case "m":
 		m.scr = scrMenu
+	case "o":
+		return m, m.openNotesBrowser()
+	case "v":
+		if s, ok := m.selected(); ok {
+			return m, m.openDiff(s.ID, scrBoard)
+		}
 	case "c":
 		return m, m.openMCP()
 	case "s":
@@ -522,10 +536,15 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.fi.Blur()
 		m.scr = scrBoard
-		if m.backTo == scrTodos {
-			m.scr, m.backTo = scrTodos, scrBoard
+		switch m.backTo {
+		case scrTodos:
+			m.scr = scrTodos
 			m.reloadTodos()
+		case scrDiff:
+			m.scr = scrDiff
+			m.reloadDiff()
 		}
+		m.backTo = scrBoard
 		return m, nil
 	case "enter":
 		text := strings.TrimSpace(m.fi.Value())
@@ -543,6 +562,9 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mgr.Stop(m.openID)
 		m.setFlash("stopping "+m.openID, false)
 		return m, nil
+	case "ctrl+g":
+		m.fi.Blur()
+		return m, m.openDiff(m.openID, scrDetail)
 	case "ctrl+r":
 		if err := m.mgr.Followup(m.openID, continuePrompt); err != nil {
 			m.setFlash(err.Error(), true)

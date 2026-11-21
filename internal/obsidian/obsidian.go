@@ -78,3 +78,40 @@ func Open(path string) error {
 	}
 	return errors.New("no way to open Obsidian URIs on this system")
 }
+
+var skipDirs = map[string]bool{
+	"node_modules": true, "vendor": true, "dist": true, "build": true, "target": true,
+	"graphify-out": true, ".git": true, ".next": true, "__pycache__": true,
+}
+
+func List(dir string, limit int) []Note {
+	var out []Note
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || len(out) >= limit {
+			return nil
+		}
+		if d.IsDir() {
+			if p != dir && (strings.HasPrefix(d.Name(), ".") || skipDirs[d.Name()] || IsGenerated(p)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(p), ".md") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, p)
+		out = append(out, Note{Path: p, Rel: strings.TrimSuffix(rel, filepath.Ext(rel)), ModTime: info.ModTime()})
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Rel) < strings.ToLower(out[j].Rel) })
+	return out
+}
+
+func IsGenerated(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".graphify_obsidian_manifest.json"))
+	return err == nil
+}
