@@ -47,6 +47,8 @@ type Session struct {
 	Turns          int       `json:"turns"`
 	LastLine       string    `json:"last_line,omitempty"`
 	Error          string    `json:"error,omitempty"`
+	ProjectID      string    `json:"project_id,omitempty"`
+	TodoID         string    `json:"todo_id,omitempty"`
 	OwnerPID       int       `json:"-"`
 	HeartbeatAt    time.Time `json:"-"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -117,6 +119,39 @@ var migrations = []string{
 	CREATE TABLE mcp_servers (name TEXT PRIMARY KEY, data TEXT NOT NULL);
 	CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 	CREATE TABLE cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at INTEGER NOT NULL);`,
+	`CREATE TABLE projects (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+		description TEXT NOT NULL DEFAULT '',
+		notes_dir TEXT NOT NULL DEFAULT '',
+		default_agent TEXT NOT NULL DEFAULT '',
+		max_parallel INTEGER NOT NULL DEFAULT 2,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE TABLE project_repos (
+		project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		path TEXT NOT NULL,
+		position INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (project_id, path)
+	);
+	CREATE TABLE todos (
+		id TEXT PRIMARY KEY,
+		project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		title TEXT NOT NULL,
+		body TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		priority INTEGER NOT NULL DEFAULT 0,
+		repo TEXT NOT NULL DEFAULT '',
+		agent TEXT NOT NULL DEFAULT '',
+		session_id TEXT NOT NULL DEFAULT '',
+		note TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE INDEX todos_project ON todos(project_id, status, priority DESC, created_at);
+	ALTER TABLE sessions ADD COLUMN project_id TEXT NOT NULL DEFAULT '';
+	ALTER TABLE sessions ADD COLUMN todo_id TEXT NOT NULL DEFAULT '';`,
 }
 
 func Open() (*Store, error) {
@@ -193,21 +228,23 @@ func b2i(b bool) int {
 }
 
 const sessionCols = `id, title, task, agent, model, approval, repo, dir, branch, base, worktree, status,
-	agent_session_id, cost, turns, last_line, error, owner_pid, heartbeat_at, created_at, updated_at`
+	agent_session_id, cost, turns, last_line, error, owner_pid, heartbeat_at, created_at, updated_at, project_id, todo_id`
 
 func (s *Store) Save(sess Session) error {
 	_, err := s.db.Exec(`INSERT INTO sessions (`+sessionCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title=excluded.title, task=excluded.task, agent=excluded.agent, model=excluded.model,
 			approval=excluded.approval, repo=excluded.repo, dir=excluded.dir, branch=excluded.branch,
 			base=excluded.base, worktree=excluded.worktree, status=excluded.status,
 			agent_session_id=excluded.agent_session_id, cost=excluded.cost, turns=excluded.turns,
 			last_line=excluded.last_line, error=excluded.error, owner_pid=excluded.owner_pid,
-			heartbeat_at=excluded.heartbeat_at, updated_at=excluded.updated_at`,
+			heartbeat_at=excluded.heartbeat_at, updated_at=excluded.updated_at,
+			project_id=excluded.project_id, todo_id=excluded.todo_id`,
 		sess.ID, sess.Title, sess.Task, sess.Agent, sess.Model, sess.Approval, sess.Repo, sess.Dir,
 		sess.Branch, sess.Base, b2i(sess.Worktree), string(sess.Status), sess.AgentSessionID, sess.Cost,
-		sess.Turns, sess.LastLine, sess.Error, sess.OwnerPID, ms(sess.HeartbeatAt), ms(sess.CreatedAt), ms(sess.UpdatedAt))
+		sess.Turns, sess.LastLine, sess.Error, sess.OwnerPID, ms(sess.HeartbeatAt), ms(sess.CreatedAt), ms(sess.UpdatedAt),
+		sess.ProjectID, sess.TodoID)
 	return err
 }
 
@@ -220,7 +257,7 @@ func scanSession(r scanner) (Session, error) {
 	var hb, created, updated int64
 	err := r.Scan(&sess.ID, &sess.Title, &sess.Task, &sess.Agent, &sess.Model, &sess.Approval, &sess.Repo,
 		&sess.Dir, &sess.Branch, &sess.Base, &worktree, &status, &sess.AgentSessionID, &sess.Cost, &sess.Turns,
-		&sess.LastLine, &sess.Error, &sess.OwnerPID, &hb, &created, &updated)
+		&sess.LastLine, &sess.Error, &sess.OwnerPID, &hb, &created, &updated, &sess.ProjectID, &sess.TodoID)
 	sess.Status = Status(status)
 	sess.Worktree = worktree != 0
 	sess.HeartbeatAt, sess.CreatedAt, sess.UpdatedAt = fromMS(hb), fromMS(created), fromMS(updated)

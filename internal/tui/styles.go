@@ -137,3 +137,48 @@ func modal(title string, body string, width int) string {
 		Width(width).
 		Render(sGoldB.Render(title) + "\n\n" + body)
 }
+
+func splitWidths(total, list int) (int, int) {
+	detail := total - list - 3
+	if detail < 24 {
+		return total, 0
+	}
+	return list, detail
+}
+
+func joinPanels(list, detail string, detailW, h int) string {
+	if detailW == 0 {
+		return list
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, list, divider(h), detail)
+}
+
+func fitLines(lines []string, focus, limit int) []string {
+	if limit <= 0 || len(lines) <= limit {
+		return lines
+	}
+	start := min(max(focus-limit/2, 0), len(lines)-limit)
+	out := append([]string(nil), lines[start:start+limit]...)
+	if start > 0 {
+		out[0] = sFaint.Render("  ⋯")
+	}
+	if start+limit < len(lines) {
+		out[len(out)-1] = sFaint.Render("  ⋯")
+	}
+	return out
+}
+
+func (m *Model) formLimit() int { return m.h - 7 }
+
+func physicalLine(lines []string, k int) int {
+	if k <= 0 {
+		return 0
+	}
+	k = min(k, len(lines))
+	return strings.Count(strings.Join(lines[:k], "\n"), "\n") + 1
+}
+
+func (m *Model) fitForm(lines []string, focusAt int) string {
+	phys := strings.Split(strings.Join(lines, "\n"), "\n")
+	return strings.Join(fitLines(phys, physicalLine(lines, focusAt), m.formLimit()), "\n")
+}

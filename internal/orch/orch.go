@@ -41,13 +41,15 @@ type PlannedTask struct {
 }
 
 type SpawnOpts struct {
-	Title    string
-	Task     string
-	Agent    string
-	Model    string
-	Approval agent.Approval
-	Repo     string
-	Dir      string
+	Title     string
+	Task      string
+	Agent     string
+	Model     string
+	Approval  agent.Approval
+	Repo      string
+	Dir       string
+	ProjectID string
+	TodoID    string
 }
 
 const (
@@ -73,6 +75,7 @@ type Manager struct {
 	wg        sync.WaitGroup
 	done      chan struct{}
 	closeOnce sync.Once
+	sched     scheduler
 }
 
 func New(st *store.Store, b *bus.Bus) (*Manager, error) {
@@ -275,6 +278,8 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 		Approval:  string(o.Approval),
 		Repo:      o.Repo,
 		Dir:       o.Dir,
+		ProjectID: o.ProjectID,
+		TodoID:    o.TodoID,
 		Status:    store.StatusQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -391,6 +396,15 @@ func (m *Manager) Remove(id string) error {
 	delete(m.localLog, id)
 	delete(m.logCursor, id)
 	m.mu.Unlock()
+	if s.TodoID != "" {
+		if t, ok, _ := m.st.Todo(s.TodoID); ok && t.SessionID == id {
+			if t.Status == store.TodoDoing || t.Status == store.TodoReview {
+				t.Status = store.TodoOpen
+			}
+			t.SessionID, t.Note = "", "worker "+id+" was released"
+			_ = m.st.SaveTodo(t)
+		}
+	}
 	m.publish(id, true)
 	return nil
 }
@@ -421,6 +435,10 @@ func (m *Manager) start(id, prompt, resume string) {
 		ResumeID:     resume,
 		Approval:     agent.Approval(snapshot.Approval),
 		SystemPrompt: fmt.Sprintf(workerPrompt, branchOr(snapshot.Branch)),
+	}
+	if dirs, extra := m.projectContext(snapshot.ProjectID); extra != "" {
+		spec.AddDirs = dirs
+		spec.SystemPrompt += "\n" + extra
 	}
 	if cfg, err := mcp.Load(m.st); err == nil {
 		spec.ApproveMCPs = cfg.AnyCursor()
@@ -468,6 +486,9 @@ func (m *Manager) start(id, prompt, resume string) {
 		_ = m.st.Save(snapshot)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			m.record(id, agent.Event{Kind: agent.KindError, Text: err.Error(), Time: time.Now()})
+		}
+		if snapshot.TodoID != "" {
+			m.todoSessionEnded(snapshot.TodoID, id, snapshot.Status, snapshot.Error)
 		}
 		m.publish(id, true)
 	}()

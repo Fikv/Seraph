@@ -120,6 +120,11 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.mcp != nil {
 			return m.mcpClick(kind, arg)
 		}
+	case "proj", "pform":
+		n, _ := strconv.Atoi(arg)
+		return m.projectClick(kind, n)
+	case "todo", "tcol", "tform":
+		return m.todoClick(kind, arg)
 	}
 	return m, nil
 }
@@ -134,7 +139,7 @@ func (m *Model) wheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
-	case scrBoard, scrPlanReview, scrMCP:
+	case scrBoard, scrPlanReview, scrMCP, scrProjects, scrTodos:
 		return m.handleKey(keyMsg(dir))
 	}
 	return m, nil
@@ -185,6 +190,8 @@ func (m *Model) menuItems() [][]menuItem {
 			{"y", "Y", "mode: " + string(m.opt.Approval), true},
 		},
 		{
+			{"g", "G", "projects", true},
+			{"t", "T", "todo board", m.project != nil},
 			{"c", "C", "MCP servers", true},
 			{"s", "S", "start screen", true},
 			{"esc", "ESC", "close", true},
