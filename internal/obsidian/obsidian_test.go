@@ -26,3 +26,16 @@ func TestRecentAndURI(t *testing.T) {
 		t.Fatalf("uri = %s", got)
 	}
 }
+
+func TestListSkipsGeneratedAndVendor(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"a.md", "docs/b.md", "gen/c.md", "node_modules/x/d.md"} {
+		os.MkdirAll(filepath.Join(dir, filepath.Dir(f)), 0o755)
+		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644)
+	}
+	os.WriteFile(filepath.Join(dir, "gen", ".graphify_obsidian_manifest.json"), []byte("{}"), 0o644)
+	notes := List(dir, 100)
+	if len(notes) != 2 || notes[0].Rel != "a" || notes[1].Rel != filepath.Join("docs", "b") {
+		t.Fatalf("notes = %+v", notes)
+	}
+}

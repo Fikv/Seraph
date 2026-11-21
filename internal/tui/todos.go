@@ -205,6 +205,14 @@ func (m *Model) todosKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		msg = "processing " + td.Title + " → worker " + id
 	case "e":
 		return m, m.openTodoForm(&td)
+	case "v":
+		if td.SessionID != "" {
+			if _, exists := m.mgr.Get(td.SessionID); exists {
+				return m, m.openDiff(td.SessionID, scrTodos)
+			}
+		}
+		m.setFlash("this todo has no worker yet", true)
+		return m, nil
 	case "u":
 		switch td.Status {
 		case store.TodoOpen:
@@ -494,7 +502,7 @@ func (m *Model) todosView() string {
 		sDim.Render(fmt.Sprintf("max %d parallel · scheduler on", m.project.MaxParallel))
 	head = lipgloss.NewStyle().MaxWidth(m.w).Render(head)
 	keys := hints(m.w, m.chip("n", "n", "new"), m.chip("enter", "⏎", "process/open"), m.chip("u", "u", "queue"),
-		m.chip("U", "U", "queue all"), m.chip("a", "a", "accept"), m.chip("r", "r", "retry"), m.chip("e", "e", "edit"),
+		m.chip("U", "U", "queue all"), m.chip("a", "a", "accept"), m.chip("r", "r", "retry"), m.chip("e", "e", "edit"), m.chip("v", "v", "diff"),
 		m.chip("<", "<", ""), m.chip(">", ">", "move"), m.chip("+", "+", "prio"), m.chip("o", "o", "notes"),
 		m.chip("d", "d", "delete"), m.chip("esc", "esc", "back"))
 	screen := m.header() + "\n" + head + "\n" + rule(m.w) + "\n" +

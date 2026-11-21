@@ -10,6 +10,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"seraph/internal/agent"
+	"seraph/internal/md"
 	"seraph/internal/store"
 	t "seraph/internal/theme"
 )
@@ -44,6 +45,10 @@ func (m *Model) screen() string {
 		return m.mcpView()
 	case scrProjects:
 		return m.projectsView()
+	case scrNotes:
+		return m.notesView()
+	case scrDiff:
+		return m.diffView()
 	case scrTodos:
 		return m.todosView()
 	}
@@ -110,7 +115,7 @@ func (m *Model) boardView() string {
 	}
 
 	keys := hints(m.w,
-		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("c", "c", "mcp"),
+		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("o", "o", "notes"), m.chip("v", "v", "diff"), m.chip("c", "c", "mcp"),
 		m.chip("r", "r", "resume"), m.chip("x", "x", "stop"), m.chip("d", "d", "release"),
 		m.chip("a", "a", "agent"), m.chip("y", "y", "mode"), m.chip("q", "q", "quit"))
 	return m.header() + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
@@ -246,7 +251,7 @@ func (m *Model) detailView() string {
 		info3 = sRose.Render("✗ " + trunc(s.Error, m.w-3))
 	}
 
-	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), key("↑↓ wheel", "scroll"),
+	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), m.chip("ctrl+g", "ctrl+g", "diff"), key("↑↓ wheel", "scroll"),
 		m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
 	return strings.Join([]string{
 		m.header(),
@@ -272,12 +277,12 @@ func renderTranscript(evs []agent.Event, agentName string, width int) string {
 		switch ev.Kind {
 		case agent.KindUser:
 			b.WriteString("\n" + sLavender.Bold(true).Render("☩ you") + "\n")
-			b.WriteString(wrap(sIvory, ev.Text) + "\n")
+			b.WriteString(md.Render(ev.Text, w) + "\n")
 		case agent.KindText:
 			if prev != agent.KindText {
 				b.WriteString("\n" + sGoldB.Render("✧ "+agentName) + "\n")
 			}
-			b.WriteString(wrap(sIvory, ev.Text) + "\n")
+			b.WriteString(md.Render(ev.Text, w) + "\n")
 		case agent.KindThinking:
 			text := strings.TrimSpace(ev.Text)
 			if r := []rune(text); len(r) > 600 {

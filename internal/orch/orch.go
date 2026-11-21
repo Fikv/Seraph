@@ -311,7 +311,7 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 	m.localLog[s.ID] = true
 	m.mu.Unlock()
 
-	m.start(s.ID, o.Task, "")
+	m.start(s.ID, o.Task, "", false)
 	return s.ID, nil
 }
 
@@ -338,7 +338,48 @@ func (m *Manager) Followup(id, prompt string) error {
 	if _, err := os.Stat(s.Dir); err != nil {
 		return fmt.Errorf("workspace is gone: %s", s.Dir)
 	}
-	m.start(id, prompt, resume)
+	m.start(id, prompt, resume, false)
+	return nil
+}
+
+const explainPrompt = `You are the Seraph worker that made the changes on branch %s, now answering the user's questions about them.
+Explain what changed and why, referring to concrete files and lines. Read files if you need to.
+Do not modify, create or delete any files, and do not run git commands that change anything.`
+
+func (m *Manager) Ask(id, question, file string, hunk string) error {
+	m.mu.Lock()
+	s, ok := m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("no session %s", id)
+	}
+	if _, running := m.cancels[id]; running {
+		m.mu.Unlock()
+		return errors.New("the worker is still running; wait for it to finish before asking")
+	}
+	resume, dir := s.AgentSessionID, s.Dir
+	m.mu.Unlock()
+	if m.RunningElsewhere(id) {
+		return errors.New("the worker is running in another seraph process")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("the worktree is gone (%s), so the agent cannot be resumed there", dir)
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		question = "Explain what happened here and why you made this change."
+	}
+	prompt := question
+	if hunk != "" {
+		prompt += "\n\nThis is about " + file + ":\n```diff\n" + hunk + "\n```"
+	} else if file != "" {
+		prompt += "\n\nThis is about the changes in " + file + "."
+	}
+	m.Log(id)
+	m.mu.Lock()
+	m.localLog[id] = true
+	m.mu.Unlock()
+	m.start(id, prompt, resume, true)
 	return nil
 }
 
@@ -409,11 +450,12 @@ func (m *Manager) Remove(id string) error {
 	return nil
 }
 
-func (m *Manager) start(id, prompt, resume string) {
+func (m *Manager) start(id, prompt, resume string, ask bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
 	s := m.sessions[id]
 	m.cancels[id] = cancel
+	prevStatus, prevErr := s.Status, s.Error
 	s.Status = store.StatusWorking
 	s.Error = ""
 	s.Turns++
@@ -436,6 +478,10 @@ func (m *Manager) start(id, prompt, resume string) {
 		Approval:     agent.Approval(snapshot.Approval),
 		SystemPrompt: fmt.Sprintf(workerPrompt, branchOr(snapshot.Branch)),
 	}
+	if ask {
+		spec.Approval = agent.ApprovalAsk
+		spec.SystemPrompt = fmt.Sprintf(explainPrompt, branchOr(snapshot.Branch))
+	}
 	if dirs, extra := m.projectContext(snapshot.ProjectID); extra != "" {
 		spec.AddDirs = dirs
 		spec.SystemPrompt += "\n" + extra
@@ -455,7 +501,7 @@ func (m *Manager) start(id, prompt, resume string) {
 			}
 			m.record(id, ev)
 		})
-		if err == nil && !resultErr && snapshot.Worktree {
+		if err == nil && !resultErr && snapshot.Worktree && !ask {
 			m.commit(id, snapshot, prompt)
 		}
 
@@ -480,6 +526,9 @@ func (m *Manager) start(id, prompt, resume string) {
 		default:
 			s.Status = store.StatusDone
 		}
+		if ask && err == nil && !resultErr && prevStatus != store.StatusWorking && prevStatus != store.StatusQueued {
+			s.Status, s.Error = prevStatus, prevErr
+		}
 		s.UpdatedAt = time.Now()
 		snapshot := *s
 		m.mu.Unlock()
@@ -487,7 +536,7 @@ func (m *Manager) start(id, prompt, resume string) {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			m.record(id, agent.Event{Kind: agent.KindError, Text: err.Error(), Time: time.Now()})
 		}
-		if snapshot.TodoID != "" {
+		if snapshot.TodoID != "" && !ask {
 			m.todoSessionEnded(snapshot.TodoID, id, snapshot.Status, snapshot.Error)
 		}
 		m.publish(id, true)

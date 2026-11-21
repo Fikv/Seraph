@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -125,6 +126,22 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.projectClick(kind, n)
 	case "todo", "tcol", "tform":
 		return m.todoClick(kind, arg)
+	case "note":
+		if m.notes != nil {
+			return m.notesClick(arg)
+		}
+	case "notelink":
+		if m.notes != nil {
+			var i int
+			fmt.Sscanf(arg, "%d", &i)
+			if i < len(m.notes.links) {
+				m.followLink(m.notes.links[i])
+			}
+		}
+	case "dfile", "hunk":
+		if m.diff != nil {
+			return m.diffClick(kind, arg)
+		}
 	}
 	return m, nil
 }
@@ -139,6 +156,23 @@ func (m *Model) wheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
+	case scrNotes:
+		if m.notes != nil && (m.notes.focus == 1 || m.zoneAt(msg) == "notesprev") {
+			var cmd tea.Cmd
+			m.notes.vp, cmd = m.notes.vp.Update(msg)
+			return m, cmd
+		}
+		return m.handleKey(keyMsg(dir))
+	case scrDiff:
+		if m.diff != nil && !strings.HasPrefix(m.zoneAt(msg), "dfile:") {
+			if dir == "up" {
+				m.diff.scroll = max(m.diff.scroll-3, 0)
+			} else {
+				m.diff.scroll += 3
+			}
+			return m, nil
+		}
+		return m.handleKey(keyMsg(dir))
 	case scrBoard, scrPlanReview, scrMCP, scrProjects, scrTodos:
 		return m.handleKey(keyMsg(dir))
 	}
@@ -191,6 +225,8 @@ func (m *Model) menuItems() [][]menuItem {
 		},
 		{
 			{"g", "G", "projects", true},
+			{"o", "O", "notes", true},
+			{"v", "V", "diff", hasSel},
 			{"t", "T", "todo board", m.project != nil},
 			{"c", "C", "MCP servers", true},
 			{"s", "S", "start screen", true},
