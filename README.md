@@ -40,6 +40,8 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `r` | resume a stopped/failed worker |
 | `x` / `d` | stop / release a worker |
 | `a` / `y` | default agent / approval mode |
+| `g` | projects: switch, create, edit, open notes in Obsidian |
+| `t` | the project todo board |
 | `m` | menu: keycap tiles for every action |
 | `s` | back to the start screen |
 | `c` | MCP servers: browse, install, test, configure |
@@ -48,6 +50,36 @@ seraph rm <id>               # remove worktree + record (branch kept)
 Mouse works everywhere: click cards (click again or double-click to open), lane headers, key chips and menu tiles; the wheel scrolls.
 
 Lanes: **⟡ in flight** (working), **☩ needs you** (failed or stopped), **✦ ascended** (done).
+
+## Projects and the todo board
+
+A **project** groups the repositories you work on and the Obsidian folder that holds their notes:
+
+```sh
+seraph project add DIKO -repo ~/code/diko -repo ~/code/diko-api \
+  -notes "/mnt/c/Users/me/Vault/DIKO" -desc "B2C shop" -agent claude -parallel 2
+seraph project use DIKO        # or press g in the TUI
+```
+
+- The board shows only the current project's workers (`◈` in the header, `g` to switch, `*` for all).
+- Workers start in the project's repo and get the notes folder as an extra directory
+  (`--add-dir`), with an instruction to read the relevant notes before they start.
+- `o` opens the project's notes in Obsidian.
+
+Press `t` for the project's **todo board**: `TODO → QUEUED → DOING → REVIEW → DONE`.
+
+- `n` adds a todo (title, details, repo, agent, priority); `e` edits it.
+- `⏎` processes a todo now: a worker starts on its own branch and the card moves to DOING.
+- `u` queues a todo, `U` queues every open one. The scheduler picks queued todos by priority
+  and never runs more than the project's `parallel` limit at once.
+- When a worker finishes the card moves to REVIEW: `a` accepts it (DONE), `r` retries on the
+  same branch, `<`/`>` move cards by hand, `⏎` opens the worker's transcript.
+- In plan review, `t` sends the planned tasks to the todo board instead of starting them.
+
+```sh
+seraph todo add -prio 2 -queue "Add a /health endpoint"
+seraph todo list
+```
 
 ## MCP servers
 

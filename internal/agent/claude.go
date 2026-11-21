@@ -25,6 +25,9 @@ func (Claude) Args(s Spec) []string {
 	default:
 		args = append(args, "--permission-mode", "acceptEdits")
 	}
+	for _, d := range s.AddDirs {
+		args = append(args, "--add-dir", d)
+	}
 	args = append(args, "--settings", noAttribution)
 	if s.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", s.SystemPrompt)

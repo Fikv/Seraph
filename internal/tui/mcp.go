@@ -573,8 +573,7 @@ func (m *Model) mcpView() string {
 
 func (m *Model) mcpInstalledView(h int) string {
 	st := m.mcp
-	listW := min(max(m.w*2/5, 36), 60)
-	detailW := max(m.w-listW-3, 20)
+	listW, detailW := splitWidths(m.w, min(max(m.w*2/5, 36), 60))
 	var rows []string
 	if len(st.cfg.Servers) == 0 {
 		rows = append(rows, "", sDim.Render("  no MCP servers yet"), "", sDim.Render("  press ")+sGold.Render("tab")+sDim.Render(" to browse the registry"))
@@ -600,10 +599,10 @@ func (m *Model) mcpInstalledView(h int) string {
 	list := lipgloss.NewStyle().Width(listW).Render(strings.Join(rows, "\n"))
 
 	detail := ""
-	if len(st.cfg.Servers) > 0 {
+	if len(st.cfg.Servers) > 0 && detailW > 0 {
 		detail = m.serverDetail(st.cfg.Servers[st.sel], detailW, h)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, list, divider(h), detail)
+	return joinPanels(list, detail, detailW, h)
 }
 
 func (m *Model) serverDetail(s mcp.Server, w, h int) string {
@@ -661,8 +660,7 @@ func (m *Model) serverDetail(s mcp.Server, w, h int) string {
 
 func (m *Model) mcpBrowseView(h int) string {
 	st := m.mcp
-	listW := min(max(m.w/2, 40), 72)
-	detailW := max(m.w-listW-3, 20)
+	listW, detailW := splitWidths(m.w, min(max(m.w/2, 40), 72))
 	lines := []string{st.search.View(), ""}
 	switch {
 	case st.loading && len(st.results) == 0:
@@ -703,10 +701,10 @@ func (m *Model) mcpBrowseView(h int) string {
 	}
 	list := lipgloss.NewStyle().Width(listW).Render(strings.Join(lines, "\n"))
 	detail := ""
-	if len(st.results) > 0 {
+	if len(st.results) > 0 && detailW > 0 {
 		detail = m.entryDetail(st.results[st.resSel], detailW, h)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, list, divider(h), detail)
+	return joinPanels(list, detail, detailW, h)
 }
 
 func (m *Model) entryDetail(e mcp.Entry, w, h int) string {
@@ -833,7 +831,16 @@ func (m *Model) formView() string {
 	if f.err != "" {
 		lines = append(lines, "", sRose.Render("✗ "+trunc(f.err, w)))
 	}
-	return modal("✦ INSTALL "+strings.ToUpper(trunc(f.entry.Display(), 40)), strings.Join(lines, "\n"), m.modalWidth())
+	focusAt := 0
+	for i, l := range lines {
+		if strings.Contains(l, "› ") || (f.focus <= nIn && strings.Contains(l, sGold.Render(f.fieldLabel()))) {
+			focusAt = i
+		}
+	}
+	if f.focus == nIn+3 {
+		focusAt = len(lines) - 1
+	}
+	return modal("✦ INSTALL "+strings.ToUpper(trunc(f.entry.Display(), 40)), m.fitForm(lines, focusAt), m.modalWidth())
 }
 
 func firstNonEmpty(vs ...string) string {
@@ -847,4 +854,14 @@ func firstNonEmpty(vs ...string) string {
 
 func divider(h int) string {
 	return sFaint.Render(strings.TrimSuffix(strings.Repeat(" │ \n", max(h, 1)), "\n"))
+}
+
+func (f *mcpForm) fieldLabel() string {
+	if f.focus == 0 {
+		return "name"
+	}
+	if f.focus-1 < len(f.opts[f.opt].Fields) {
+		return f.opts[f.opt].Fields[f.focus-1].Name
+	}
+	return ""
 }

@@ -39,6 +39,8 @@ Usage:
   seraph run [flags] "<task>"    run one worker headless and stream it
   seraph ls                      list sessions
   seraph rm <id>                 remove a session and its worktree (branch kept)
+  seraph project <cmd>           projects: list, add, use, rm (repos + Obsidian notes)
+  seraph todo list|add           the project todo board
   seraph mcp <cmd>               manage MCP servers (list, search, add, test, rm)
   seraph redis up|down|status    optional Redis for live sync and caching
   seraph db                      show the SQLite database
@@ -105,6 +107,10 @@ func run(args []string) error {
 			return cmdMCP(args[1:])
 		case "redis":
 			return cmdRedis(args[1:])
+		case "project", "projects":
+			return cmdProject(args[1:])
+		case "todo", "todos":
+			return cmdTodo(args[1:])
 		case "db":
 			return cmdDB()
 		case "doctor":

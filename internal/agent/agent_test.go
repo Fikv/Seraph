@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -51,7 +52,10 @@ func TestCursorParse(t *testing.T) {
 
 func TestArgsEndWithPrompt(t *testing.T) {
 	for _, d := range []Driver{Claude{}, Cursor{}} {
-		args := d.Args(Spec{Prompt: "-do it", Approval: ApprovalYolo, ResumeID: "r1"})
+		args := d.Args(Spec{Prompt: "-do it", Approval: ApprovalYolo, ResumeID: "r1", AddDirs: []string{"/notes"}})
+		if !strings.Contains(strings.Join(args, " "), "--add-dir /notes") {
+			t.Errorf("%s: missing --add-dir, got %v", d.Name(), args)
+		}
 		if n := len(args); n < 2 || args[n-2] != "--" || args[n-1] != "-do it" {
 			t.Errorf("%s: prompt must follow --, got %v", d.Name(), args)
 		}

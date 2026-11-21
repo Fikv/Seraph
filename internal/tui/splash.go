@@ -105,7 +105,7 @@ func (m *Model) panelLines() []string {
 	divider := sFaint.Render(strings.Repeat("─", panelWidth))
 
 	repo := sIvory.Render(m.repoText)
-	if m.opt.Repo == "" {
+	if m.spawnRepo() == "" {
 		repo = sRose.Render("no git repo") + sDim.Render(" · workers share the dir")
 	}
 	var agents []string
@@ -127,6 +127,7 @@ func (m *Model) panelLines() []string {
 
 	lines := []string{
 		divider,
+		row("project", m.splashProject()),
 		row("repo", repo),
 		row("agents", strings.Join(agents, "   ")),
 		row("default", agentLabel(m.opt.Agent)+sDim.Render(" · ")+approvalLabel(string(m.opt.Approval))),
@@ -149,7 +150,7 @@ func (m *Model) panelLines() []string {
 	}
 	lines = append(lines,
 		divider,
-		key("n", "summon")+"   "+key("p", "plan")+"   "+key("c", "mcp")+"   "+key("a", "agent")+"   "+key("y", "mode")+"   "+key("q", "quit"),
+		key("n", "summon")+"   "+key("p", "plan")+"   "+key("t", "todo")+"   "+key("g", "project")+"   "+key("a", "agent")+"   "+key("y", "mode")+"   "+key("q", "quit"),
 	)
 	return lines
 }
@@ -293,4 +294,23 @@ func (m *Model) storageLine() string {
 		redis = sRose.Render("redis ✗ unreachable")
 	}
 	return sIvory.Render("sqlite") + sFaint.Render(" · ") + redis
+}
+
+func (m *Model) splashProject() string {
+	if m.project == nil {
+		return sDim.Render("all projects") + sFaint.Render(" · g to pick one")
+	}
+	open := 0
+	if todos, err := m.mgr.Store().Todos(m.project.ID); err == nil {
+		for _, td := range todos {
+			if td.Status != store.TodoDone {
+				open++
+			}
+		}
+	}
+	notes := ""
+	if m.project.NotesDir != "" {
+		notes = sFaint.Render(" · ") + sLavender.Render("obsidian ✓")
+	}
+	return sLavender.Bold(true).Render("◈ "+trunc(m.project.Name, 20)) + sFaint.Render(fmt.Sprintf(" · %d open todo", open)) + notes
 }

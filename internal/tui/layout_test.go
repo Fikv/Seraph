@@ -2,6 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +81,23 @@ func testModel(t *testing.T) *Model {
 	}
 	m.mcp.next = "cursor"
 	m.mcp.searched = true
+	repo := gitRepoForTest(t)
+	notes := t.TempDir()
+	os.WriteFile(filepath.Join(notes, "Architecture.md"), []byte("x"), 0o644)
+	proj := store.Project{ID: "p1", Name: "A project with a rather long name", Description: strings.Repeat("describes the project ", 10), NotesDir: notes, Repos: []string{repo, "/missing/repo/" + strings.Repeat("deep/", 12)}, MaxParallel: 2}
+	if err := st.SaveProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	for i, status := range store.TodoStatuses {
+		for j := 0; j < 3; j++ {
+			sid := ""
+			if status == store.TodoDoing || status == store.TodoReview {
+				sid = "s00000"
+			}
+			st.SaveTodo(store.Todo{ID: fmt.Sprintf("t%d%d", i, j), ProjectID: "p1", Title: strings.Repeat("todo title ", 6), Body: strings.Repeat("details ", 30), Status: status, Priority: j, SessionID: sid, Note: strings.Repeat("note ", 20)})
+		}
+	}
+	m.loadProjects()
 	return m
 }
 
@@ -90,15 +110,48 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.splashStart = time.Now().Add(-700 * time.Millisecond)
 			m.splashDone = false
 		},
-		"splash":   func(m *Model) { m.scr = scrSplash; m.splashDone = true },
-		"board":    func(m *Model) { m.scr = scrBoard },
-		"detail":   func(m *Model) { m.openDetail("s00000") },
-		"new":      func(m *Model) { m.scr = scrNew },
-		"plangoal": func(m *Model) { m.scr = scrPlanGoal },
-		"planning": func(m *Model) { m.scr = scrPlanning },
-		"review":   func(m *Model) { m.scr = scrPlanReview },
-		"confirm":  func(m *Model) { m.scr = scrConfirm },
-		"menu":     func(m *Model) { m.scr = scrMenu },
+		"splash":        func(m *Model) { m.scr = scrSplash; m.splashDone = true },
+		"board":         func(m *Model) { m.scr = scrBoard },
+		"detail":        func(m *Model) { m.openDetail("s00000") },
+		"new":           func(m *Model) { m.scr = scrNew },
+		"plangoal":      func(m *Model) { m.scr = scrPlanGoal },
+		"planning":      func(m *Model) { m.scr = scrPlanning },
+		"review":        func(m *Model) { m.scr = scrPlanReview },
+		"confirm":       func(m *Model) { m.scr = scrConfirm },
+		"menu":          func(m *Model) { m.scr = scrMenu },
+		"mcp-installed": func(m *Model) { m.scr = scrMCP; m.mcp.tab = 0 },
+		"mcp-browse":    func(m *Model) { m.scr = scrMCP; m.mcp.tab = 1; m.mcp.resSel = 7 },
+		"mcp-form": func(m *Model) {
+			m.scr = scrMCP
+			m.mcp.tab = 1
+			m.openForm(m.mcp.results[0])
+			m.mcp.form.focus = 6
+			m.mcp.form.err = strings.Repeat("error ", 40)
+		},
+		"projects": func(m *Model) { m.openProjects() },
+		"project-form": func(m *Model) {
+			m.openProjects()
+			m.openProjectForm(&m.projects[0])
+			m.projForm.err = strings.Repeat("err ", 40)
+		},
+		"todos": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openTodos()
+			m.todoCol = 2
+		},
+		"todo-form": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openTodos()
+			td := m.todos[0]
+			m.openTodoForm(&td)
+			m.todoForm.err = strings.Repeat("err ", 40)
+		},
+		"board-project": func(m *Model) { p := m.projects[0]; m.useProject(&p); m.scr = scrBoard },
+	}
+	if len(screens) != 18 {
+		t.Fatalf("expected 18 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -121,5 +174,35 @@ func TestLayoutFitsTerminal(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func gitRepoForTest(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", "-b", "main", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	return dir
+}
+
+func TestTodoSelectionFollowsCard(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
+	p := m.projects[0]
+	m.useProject(&p)
+	m.openTodos()
+	m.selectTodo("t20")
+	if m.todoCol != 2 {
+		t.Fatalf("t20 should start in DOING, col=%d", m.todoCol)
+	}
+	td, _, _ := m.mgr.Store().Todo("t20")
+	td.Status = store.TodoReview
+	m.mgr.Store().SaveTodo(td)
+	m.reloadTodos()
+	if sel, ok := m.selectedTodo(); !ok || sel.ID != "t20" || m.todoCol != 3 {
+		t.Fatalf("selection should follow t20 into REVIEW, got %+v col=%d", sel, m.todoCol)
 	}
 }

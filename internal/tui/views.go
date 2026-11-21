@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"seraph/internal/agent"
@@ -41,6 +42,10 @@ func (m *Model) screen() string {
 		return m.overlay(m.menuView())
 	case scrMCP:
 		return m.mcpView()
+	case scrProjects:
+		return m.projectsView()
+	case scrTodos:
+		return m.todosView()
 	}
 	return m.boardView()
 }
@@ -50,12 +55,18 @@ func (m *Model) overlay(box string) string {
 }
 
 func (m *Model) header() string {
-	left := sGoldB.Render("✧ SERAPH") + "  " + sDim.Render(m.repoText)
+	left := sGoldB.Render("✧ SERAPH") + "  " + m.projectLabel() + "  " + sDim.Render(m.repoText)
 	ls := m.lanes()
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
 		sGold.Render(fmt.Sprintf("✦ %d", len(ls[laneAscended])))
 	right := agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
+	if lipgloss.Width(right) > m.w/2 {
+		right = counts
+	}
+	if room := m.w - lipgloss.Width(right) - 2; lipgloss.Width(left) > room {
+		left = ansi.Truncate(left, max(room, 0), "…")
+	}
 	gap := max(m.w-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
 	return left + strings.Repeat(" ", gap) + right + "\n" + rule(m.w)
 }
@@ -99,7 +110,7 @@ func (m *Model) boardView() string {
 	}
 
 	keys := hints(m.w,
-		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("c", "c", "mcp"),
+		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("c", "c", "mcp"),
 		m.chip("r", "r", "resume"), m.chip("x", "x", "stop"), m.chip("d", "d", "release"),
 		m.chip("a", "a", "agent"), m.chip("y", "y", "mode"), m.chip("q", "q", "quit"))
 	return m.header() + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
@@ -305,7 +316,7 @@ func renderTranscript(evs []agent.Event, agentName string, width int) string {
 }
 
 func (m *Model) targetLine() string {
-	if m.opt.Repo == "" {
+	if m.spawnRepo() == "" {
 		return sRose.Render("no git repo: workers share " + m.opt.Dir)
 	}
 	return sDim.Render("each worker gets its own worktree off ") + sLavender.Render(m.repoText)
@@ -361,7 +372,7 @@ func (m *Model) reviewView() string {
 	}
 	body := strings.Join(rows, "\n") + "\n" +
 		sDim.Render("mode ") + approvalLabel(string(m.opt.Approval)) + "\n\n" +
-		hints(w, m.chip("enter", "⏎", "summon all"), m.chip(" ", "space", "toggle"), m.chip("tab", "tab", "agent"),
+		hints(w, m.chip("enter", "⏎", "summon all"), m.chip("t", "t", "to todo board"), m.chip(" ", "space", "toggle"), m.chip("tab", "tab", "agent"),
 			m.chip("y", "y", "mode"), m.chip("esc", "esc", "discard"))
 	return modal(fmt.Sprintf("✦ THE PLAN · %d TASKS", len(m.plan)), body, m.modalWidth())
 }

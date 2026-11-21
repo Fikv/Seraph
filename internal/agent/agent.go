@@ -55,6 +55,7 @@ type Spec struct {
 	Approval     Approval
 	SystemPrompt string
 	ApproveMCPs  bool
+	AddDirs      []string
 }
 
 type Driver interface {
@@ -70,6 +71,8 @@ var drivers = map[string]Driver{
 }
 
 func Names() []string { return []string{"claude", "cursor"} }
+
+func Register(name string, d Driver) { drivers[name] = d }
 
 func Get(name string) (Driver, error) {
 	d, ok := drivers[name]
