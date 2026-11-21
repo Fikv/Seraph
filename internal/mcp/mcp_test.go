@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"seraph/internal/store"
 )
 
 func entry(t *testing.T, raw string) Entry {
@@ -151,5 +153,35 @@ func TestProbeStdio(t *testing.T) {
 	Check(ctx, &bad)
 	if bad.Status != StatusError || !strings.Contains(bad.Error, "boom") {
 		t.Fatalf("bad status=%s err=%s", bad.Status, bad.Error)
+	}
+}
+
+func TestConfigInSQLiteAndLegacyImport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SERAPH_HOME", home)
+	os.WriteFile(filepath.Join(home, "mcp.json"), []byte(`{"servers":[{"name":"old","transport":"stdio","command":"npx","claude":true}]}`), 0o600)
+	st, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c, err := Load(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, ok := c.Get("old"); !ok || !s.Claude {
+		t.Fatalf("legacy mcp.json not imported: %+v", c.Servers)
+	}
+	if _, err := os.Stat(filepath.Join(home, "mcp.json")); !os.IsNotExist(err) {
+		t.Fatal("legacy file should be renamed")
+	}
+	c.Put(Server{Name: "new", Transport: TransportHTTP, URL: "https://x", Cursor: true})
+	c.Delete("old")
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	c2, _ := Load(st)
+	if len(c2.Servers) != 1 || c2.Servers[0].Name != "new" || !c2.AnyCursor() {
+		t.Fatalf("reloaded = %+v", c2.Servers)
 	}
 }

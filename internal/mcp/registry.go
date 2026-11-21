@@ -75,7 +75,42 @@ type listResponse struct {
 
 var httpClient = &http.Client{Timeout: 20 * time.Second}
 
+type Cache interface {
+	CacheGet(ctx context.Context, key string) (string, bool)
+	CacheSet(ctx context.Context, key, value string, ttl time.Duration)
+}
+
+var cache Cache
+
+func SetCache(c Cache) { cache = c }
+
+const searchTTL = 10 * time.Minute
+
+type cachedPage struct {
+	Entries []Entry `json:"entries"`
+	Next    string  `json:"next"`
+}
+
 func Search(ctx context.Context, query, cursor string, limit int) ([]Entry, string, error) {
+	key := fmt.Sprintf("mcp:search:%d:%s:%s", limit, strings.ToLower(strings.TrimSpace(query)), cursor)
+	if cache != nil {
+		if raw, ok := cache.CacheGet(ctx, key); ok {
+			var p cachedPage
+			if json.Unmarshal([]byte(raw), &p) == nil {
+				return p.Entries, p.Next, nil
+			}
+		}
+	}
+	entries, next, err := search(ctx, query, cursor, limit)
+	if err == nil && cache != nil {
+		if raw, merr := json.Marshal(cachedPage{entries, next}); merr == nil {
+			cache.CacheSet(ctx, key, string(raw), searchTTL)
+		}
+	}
+	return entries, next, err
+}
+
+func search(ctx context.Context, query, cursor string, limit int) ([]Entry, string, error) {
 	q := url.Values{}
 	q.Set("version", "latest")
 	q.Set("limit", fmt.Sprint(limit))

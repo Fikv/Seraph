@@ -49,39 +49,83 @@ const (
 
 type Config struct {
 	Servers []Server `json:"servers"`
+	st      *store.Store
 }
 
-func Path() string { return filepath.Join(store.Home(), "mcp.json") }
+func legacyPath() string { return filepath.Join(store.Home(), "mcp.json") }
 
-func Load() (*Config, error) {
-	data, err := os.ReadFile(Path())
-	if errors.Is(err, os.ErrNotExist) {
-		return &Config{}, nil
-	}
+func Load(st *store.Store) (*Config, error) {
+	c := &Config{st: st}
+	rows, err := st.DB().Query(`SELECT data FROM mcp_servers ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
-	var c Config
-	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("%s: %w", Path(), err)
+	defer rows.Close()
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var s Server
+		if json.Unmarshal([]byte(data), &s) == nil && s.Name != "" {
+			c.Servers = append(c.Servers, s)
+		}
 	}
-	return &c, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(c.Servers) == 0 {
+		if err := c.importLegacy(); err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
 }
 
-func (c *Config) Save() error {
-	sort.Slice(c.Servers, func(i, j int) bool { return c.Servers[i].Name < c.Servers[j].Name })
-	data, err := json.MarshalIndent(c, "", "  ")
+func (c *Config) importLegacy() error {
+	data, err := os.ReadFile(legacyPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(Path()), 0o755); err != nil {
+	var legacy struct {
+		Servers []Server `json:"servers"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return fmt.Errorf("%s: %w", legacyPath(), err)
+	}
+	c.Servers = legacy.Servers
+	if err := c.Save(); err != nil {
 		return err
 	}
-	tmp := Path() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	return os.Rename(legacyPath(), legacyPath()+".imported")
+}
+
+func (c *Config) Save() error {
+	if c.st == nil {
+		return errors.New("mcp config has no store")
+	}
+	sort.Slice(c.Servers, func(i, j int) bool { return c.Servers[i].Name < c.Servers[j].Name })
+	tx, err := c.st.DB().Begin()
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, Path())
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM mcp_servers`); err != nil {
+		return err
+	}
+	for _, s := range c.Servers {
+		data, err := json.Marshal(s)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO mcp_servers (name, data) VALUES (?, ?)`, s.Name, string(data)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (c *Config) Get(name string) (*Server, bool) {

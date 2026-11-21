@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"seraph/internal/agent"
+	"seraph/internal/bus"
 	"seraph/internal/mcp"
 	"seraph/internal/store"
 	"seraph/internal/workspace"
@@ -49,38 +50,148 @@ type SpawnOpts struct {
 	Dir      string
 }
 
+const (
+	heartbeatEvery = 5 * time.Second
+	staleAfter     = 20 * time.Second
+	publishEvery   = 150 * time.Millisecond
+	persistEvery   = 700 * time.Millisecond
+)
+
 type Manager struct {
-	st       *store.Store
-	mu       sync.Mutex
-	sessions map[string]*store.Session
-	logs     map[string][]agent.Event
-	versions map[string]int
-	cancels  map[string]context.CancelFunc
-	wg       sync.WaitGroup
+	st        *store.Store
+	bus       *bus.Bus
+	pid       int
+	mu        sync.Mutex
+	sessions  map[string]*store.Session
+	logs      map[string][]agent.Event
+	versions  map[string]int
+	cancels   map[string]context.CancelFunc
+	localLog  map[string]bool
+	logCursor map[string]int64
+	lastPub   map[string]time.Time
+	lastSave  map[string]time.Time
+	wg        sync.WaitGroup
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
-func New(st *store.Store) (*Manager, error) {
-	list, err := st.List()
-	if err != nil {
+func New(st *store.Store, b *bus.Bus) (*Manager, error) {
+	m := &Manager{
+		st:        st,
+		bus:       b,
+		pid:       os.Getpid(),
+		sessions:  map[string]*store.Session{},
+		logs:      map[string][]agent.Event{},
+		versions:  map[string]int{},
+		cancels:   map[string]context.CancelFunc{},
+		localLog:  map[string]bool{},
+		logCursor: map[string]int64{},
+		lastPub:   map[string]time.Time{},
+		lastSave:  map[string]time.Time{},
+		done:      make(chan struct{}),
+	}
+	if err := m.reload(); err != nil {
 		return nil, err
 	}
-	m := &Manager{
-		st:       st,
-		sessions: map[string]*store.Session{},
-		logs:     map[string][]agent.Event{},
-		versions: map[string]int{},
-		cancels:  map[string]context.CancelFunc{},
+	go m.heartbeatLoop()
+	return m, nil
+}
+
+func (m *Manager) Store() *store.Store { return m.st }
+
+func (m *Manager) Bus() *bus.Bus { return m.bus }
+
+func (m *Manager) Close() {
+	m.closeOnce.Do(func() { close(m.done) })
+}
+
+func stale(s store.Session) bool {
+	return (s.Status == store.StatusWorking || s.Status == store.StatusQueued) && time.Since(s.HeartbeatAt) > staleAfter
+}
+
+func (m *Manager) reload() error {
+	list, err := m.st.List()
+	if err != nil {
+		return err
 	}
+	var fixed []store.Session
+	m.mu.Lock()
+	seen := map[string]bool{}
 	for i := range list {
 		s := list[i]
-		if s.Status == store.StatusWorking || s.Status == store.StatusQueued {
-			s.Status = store.StatusStopped
-			s.Error = "interrupted: seraph exited while the agent was running"
-			_ = st.Save(s)
+		seen[s.ID] = true
+		if _, local := m.cancels[s.ID]; local {
+			continue
 		}
-		m.sessions[s.ID] = &s
+		if stale(s) {
+			s.Status = store.StatusStopped
+			s.Error = "interrupted: the seraph process running this worker exited"
+			fixed = append(fixed, s)
+		}
+		cur, ok := m.sessions[s.ID]
+		if !ok || cur.UpdatedAt != s.UpdatedAt || cur.Status != s.Status || cur.HeartbeatAt.IsZero() != s.HeartbeatAt.IsZero() {
+			cp := s
+			m.sessions[s.ID] = &cp
+			m.versions[s.ID]++
+		}
 	}
-	return m, nil
+	for id := range m.sessions {
+		if _, local := m.cancels[id]; !seen[id] && !local {
+			delete(m.sessions, id)
+			delete(m.logs, id)
+			delete(m.logCursor, id)
+			delete(m.localLog, id)
+		}
+	}
+	m.mu.Unlock()
+	for _, s := range fixed {
+		_ = m.st.Save(s)
+	}
+	return nil
+}
+
+func (m *Manager) Refresh() { _ = m.reload() }
+
+func (m *Manager) heartbeatLoop() {
+	t := time.NewTicker(heartbeatEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-m.done:
+			return
+		case <-t.C:
+		}
+		m.mu.Lock()
+		ids := make([]string, 0, len(m.cancels))
+		for id := range m.cancels {
+			ids = append(ids, id)
+		}
+		m.mu.Unlock()
+		stop, err := m.st.Heartbeat(ids, m.pid, time.Now())
+		if err != nil {
+			continue
+		}
+		for _, id := range stop {
+			_ = m.st.RequestStop(id, false)
+			m.Stop(id)
+		}
+	}
+}
+
+func (m *Manager) publish(id string, force bool) {
+	if m.bus == nil {
+		return
+	}
+	m.mu.Lock()
+	if !force && time.Since(m.lastPub[id]) < publishEvery {
+		m.mu.Unlock()
+		return
+	}
+	m.lastPub[id] = time.Now()
+	m.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	m.bus.Publish(ctx, id)
 }
 
 func (m *Manager) Sessions() []store.Session {
@@ -107,12 +218,13 @@ func (m *Manager) Get(id string) (store.Session, bool) {
 func (m *Manager) Log(id string) ([]agent.Event, int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.logs[id]; !ok {
-		evs, _ := m.st.ReadLog(id)
-		if evs == nil {
-			evs = []agent.Event{}
+	if !m.localLog[id] {
+		evs, last, err := m.st.ReadLogSince(id, m.logCursor[id])
+		if err == nil && len(evs) > 0 {
+			m.logs[id] = append(m.logs[id], evs...)
+			m.logCursor[id] = last
+			m.versions[id]++
 		}
-		m.logs[id] = evs
 	}
 	evs := m.logs[id]
 	return append([]agent.Event(nil), evs...), m.versions[id]
@@ -123,6 +235,24 @@ func (m *Manager) Running(id string) bool {
 	defer m.mu.Unlock()
 	_, ok := m.cancels[id]
 	return ok
+}
+
+func (m *Manager) RunningElsewhere(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, local := m.cancels[id]; local {
+		return false
+	}
+	s, ok := m.sessions[id]
+	return ok && (s.Status == store.StatusWorking || s.Status == store.StatusQueued) && !stale(*s)
+}
+
+func (m *Manager) Active(id string) bool { return m.Running(id) || m.RunningElsewhere(id) }
+
+func (m *Manager) LocalRunning() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.cancels)
 }
 
 func (m *Manager) Spawn(o SpawnOpts) (string, error) {
@@ -173,6 +303,7 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 	m.mu.Lock()
 	m.sessions[s.ID] = &s
 	m.logs[s.ID] = []agent.Event{}
+	m.localLog[s.ID] = true
 	m.mu.Unlock()
 
 	m.start(s.ID, o.Task, "")
@@ -192,6 +323,13 @@ func (m *Manager) Followup(id, prompt string) error {
 	}
 	resume := s.AgentSessionID
 	m.mu.Unlock()
+	if m.RunningElsewhere(id) {
+		return errors.New("the worker is running in another seraph process; stop it first or wait")
+	}
+	m.Log(id)
+	m.mu.Lock()
+	m.localLog[id] = true
+	m.mu.Unlock()
 	if _, err := os.Stat(s.Dir); err != nil {
 		return fmt.Errorf("workspace is gone: %s", s.Dir)
 	}
@@ -205,6 +343,11 @@ func (m *Manager) Stop(id string) {
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
+		return
+	}
+	if m.RunningElsewhere(id) {
+		_ = m.st.RequestStop(id, true)
+		m.publish(id, true)
 	}
 }
 
@@ -220,6 +363,9 @@ func (m *Manager) StopAll() {
 func (m *Manager) Wait() { m.wg.Wait() }
 
 func (m *Manager) Remove(id string) error {
+	if m.RunningElsewhere(id) {
+		return errors.New("the worker is running in another seraph process; stop it first")
+	}
 	m.Stop(id)
 	m.mu.Lock()
 	s, ok := m.sessions[id]
@@ -242,7 +388,10 @@ func (m *Manager) Remove(id string) error {
 	delete(m.sessions, id)
 	delete(m.logs, id)
 	delete(m.versions, id)
+	delete(m.localLog, id)
+	delete(m.logCursor, id)
 	m.mu.Unlock()
+	m.publish(id, true)
 	return nil
 }
 
@@ -255,9 +404,13 @@ func (m *Manager) start(id, prompt, resume string) {
 	s.Error = ""
 	s.Turns++
 	s.UpdatedAt = time.Now()
+	s.OwnerPID = m.pid
+	s.HeartbeatAt = time.Now()
 	snapshot := *s
 	m.mu.Unlock()
+	_ = m.st.RequestStop(id, false)
 	_ = m.st.Save(snapshot)
+	m.publish(id, true)
 	m.record(id, agent.Event{Kind: agent.KindUser, Text: prompt, Time: time.Now()})
 
 	d, _ := agent.Get(snapshot.Agent)
@@ -269,7 +422,7 @@ func (m *Manager) start(id, prompt, resume string) {
 		Approval:     agent.Approval(snapshot.Approval),
 		SystemPrompt: fmt.Sprintf(workerPrompt, branchOr(snapshot.Branch)),
 	}
-	if cfg, err := mcp.Load(); err == nil {
+	if cfg, err := mcp.Load(m.st); err == nil {
 		spec.ApproveMCPs = cfg.AnyCursor()
 	}
 
@@ -316,6 +469,7 @@ func (m *Manager) start(id, prompt, resume string) {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			m.record(id, agent.Event{Kind: agent.KindError, Text: err.Error(), Time: time.Now()})
 		}
+		m.publish(id, true)
 	}()
 }
 
@@ -368,16 +522,22 @@ func (m *Manager) record(id string, ev agent.Event) {
 		}
 	}
 	s.UpdatedAt = time.Now()
-	persist := ev.Kind == agent.KindInit || ev.Kind == agent.KindResult
+	s.HeartbeatAt = time.Now()
+	persist := ev.Kind == agent.KindInit || ev.Kind == agent.KindResult ||
+		(ev.Kind != agent.KindThinking && time.Since(m.lastSave[id]) > persistEvery)
+	if persist {
+		m.lastSave[id] = time.Now()
+	}
 	snapshot := *s
 	m.mu.Unlock()
 
 	if !(ev.Kind == agent.KindThinking && ev.Delta) {
-		_ = m.st.AppendLog(id, ev)
+		_, _ = m.st.AppendLog(id, ev)
 	}
 	if persist {
 		_ = m.st.Save(snapshot)
 	}
+	m.publish(id, ev.Kind == agent.KindResult)
 }
 
 func (m *Manager) Plan(ctx context.Context, goal, agentName, model, repo string) ([]PlannedTask, error) {

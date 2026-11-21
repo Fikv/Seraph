@@ -41,6 +41,8 @@ type tickMsg time.Time
 
 type versionsMsg map[string]string
 
+type busMsg string
+
 type planDoneMsg struct {
 	tasks []orch.PlannedTask
 	err   error
@@ -54,6 +56,8 @@ type Options struct {
 	Approval   agent.Approval
 	SkipSplash bool
 	Version    string
+	Storage    string
+	Updates    <-chan string
 }
 
 type Model struct {
@@ -65,6 +69,7 @@ type Model struct {
 	frame       int
 	splashStart time.Time
 	splashDone  bool
+	lastRefresh time.Time
 	versions    map[string]string
 
 	lane lane
@@ -160,15 +165,52 @@ func (m *Model) tickEvery() time.Duration {
 	return 110 * time.Millisecond
 }
 
-func (m *Model) Init() tea.Cmd { return tea.Batch(tick(m.tickEvery()), probeVersions()) }
+func (m *Model) Init() tea.Cmd {
+	return tea.Batch(tick(m.tickEvery()), m.probeVersions(), waitBus(m.opt.Updates))
+}
 
-func probeVersions() tea.Cmd {
+func waitBus(ch <-chan string) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		id, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return busMsg(id)
+	}
+}
+
+type versionCache interface {
+	CacheGet(ctx context.Context, key string) (string, bool)
+	CacheSet(ctx context.Context, key, value string, ttl time.Duration)
+}
+
+func (m *Model) cache() versionCache {
+	if b := m.mgr.Bus(); b != nil {
+		return b
+	}
+	return m.mgr.Store()
+}
+
+func (m *Model) probeVersions() tea.Cmd {
+	c := m.cache()
 	return func() tea.Msg {
 		out := versionsMsg{}
 		for _, name := range agent.Names() {
-			d, _ := agent.Get(name)
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			v, _ := agent.Version(ctx, d)
+			key := "agent:version:" + name
+			if v, ok := c.CacheGet(ctx, key); ok {
+				out[name] = v
+				cancel()
+				continue
+			}
+			d, _ := agent.Get(name)
+			v, err := agent.Version(ctx, d)
+			if err == nil {
+				c.CacheSet(ctx, key, v, time.Hour)
+			}
 			cancel()
 			out[name] = v
 		}
@@ -188,12 +230,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		m.frame++
+		every := time.Second
+		if m.opt.Updates != nil {
+			every = 5 * time.Second
+		}
+		if time.Since(m.lastRefresh) > every {
+			m.mgr.Refresh()
+			m.lastRefresh = time.Now()
+		}
 		if m.scr == scrDetail {
 			m.refreshDetail(false)
 		}
 		return m, tick(m.tickEvery())
 	case mcpSearchMsg, mcpDoneMsg:
 		return m.mcpMsg(msg)
+	case busMsg:
+		m.mgr.Refresh()
+		m.lastRefresh = time.Now()
+		return m, waitBus(m.opt.Updates)
 	case versionsMsg:
 		m.versions = msg
 		return m, nil
@@ -316,7 +370,7 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 	ls := m.lanes()
 	switch key {
 	case "q":
-		running := len(ls[laneFlight])
+		running := m.mgr.LocalRunning()
 		if running > 0 && !m.quitArmed {
 			m.quitArmed = true
 			m.setFlash(fmt.Sprintf("%d worker(s) still ascending: press q again to stop them and quit", running), true)
@@ -365,7 +419,7 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 	case "y":
 		m.toggleApproval()
 	case "x":
-		if s, ok := m.selected(); ok && m.mgr.Running(s.ID) {
+		if s, ok := m.selected(); ok && m.mgr.Active(s.ID) {
 			m.mgr.Stop(s.ID)
 			m.setFlash("stopping "+s.ID, false)
 		}

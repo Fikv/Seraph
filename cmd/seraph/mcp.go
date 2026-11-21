@@ -30,7 +30,12 @@ func cmdMCP(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cfg, err := mcp.Load()
+	stg, err := openStorage()
+	if err != nil {
+		return err
+	}
+	defer stg.close()
+	cfg, err := mcp.Load(stg.st)
 	if err != nil {
 		return err
 	}

@@ -170,7 +170,7 @@ type menuItem struct {
 
 func (m *Model) menuItems() [][]menuItem {
 	sel, hasSel := m.selected()
-	running := hasSel && m.mgr.Running(sel.ID)
+	running := hasSel && m.mgr.Active(sel.ID)
 	return [][]menuItem{
 		{
 			{"n", "N", "summon", true},

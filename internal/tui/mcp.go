@@ -71,7 +71,7 @@ func newSearchInput() textinput.Model {
 }
 
 func (m *Model) openMCP() tea.Cmd {
-	cfg, err := mcp.Load()
+	cfg, err := mcp.Load(m.mgr.Store())
 	if err != nil {
 		m.setFlash(err.Error(), true)
 		return nil
