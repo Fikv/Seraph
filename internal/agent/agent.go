@@ -54,6 +54,7 @@ type Spec struct {
 	ResumeID     string
 	Approval     Approval
 	SystemPrompt string
+	ApproveMCPs  bool
 }
 
 type Driver interface {

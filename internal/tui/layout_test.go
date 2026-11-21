@@ -11,6 +11,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"seraph/internal/agent"
+	"seraph/internal/mcp"
 	"seraph/internal/orch"
 	"seraph/internal/store"
 )
@@ -56,6 +57,27 @@ func testModel(t *testing.T) *Model {
 	m.planGoal = strings.Repeat("goal ", 50)
 	m.planStart = time.Now()
 	m.confirmID = "s00000"
+	t.Setenv("HOME", t.TempDir())
+	tools := make([]string, 40)
+	for i := range tools {
+		tools[i] = fmt.Sprintf("tool_number_%d", i)
+	}
+	m.mcp = &mcpState{search: newSearchInput(), busy: map[string]string{"beta": "testing"}, cfg: &mcp.Config{Servers: []mcp.Server{
+		{Name: "alpha", Transport: "stdio", Command: "npx", Args: []string{"-y", "@scope/" + strings.Repeat("very-long-package-", 5)}, Env: map[string]string{"API_KEY": "secret", "ROOT": strings.Repeat("/deep", 30)}, Secrets: []string{"API_KEY"}, Claude: true, Cursor: true, Status: "ok", Tools: tools, Description: strings.Repeat("describes things ", 20), CheckedAt: time.Now()},
+		{Name: "beta", Transport: "http", URL: "https://example.com/mcp", Headers: map[string]string{"Authorization": "x"}, Claude: true},
+		{Name: "gamma-with-a-really-long-name-that-overflows", Transport: "stdio", Command: "uvx", Status: "error", Error: strings.Repeat("traceback line\t\r", 30)},
+	}}}
+	entry := mcp.Entry{Name: "io.github.acme/" + strings.Repeat("server", 10), Title: "Acme", Version: "1.0.0", Description: strings.Repeat("a registry description ", 15)}
+	entry.Packages = []mcp.Package{{RegistryType: "npm", Identifier: "@acme/x", Version: "1.0.0"}}
+	for i := 0; i < 9; i++ {
+		entry.Packages[0].EnvironmentVariables = append(entry.Packages[0].EnvironmentVariables, mcp.Input{Name: fmt.Sprintf("VAR_%d", i), Description: strings.Repeat("explains the variable ", 8), IsRequired: i%2 == 0, IsSecret: i%3 == 0})
+	}
+	entry.Remotes = []mcp.Remote{{Type: "streamable-http", URL: "https://{tenant}.acme.dev/mcp"}}
+	for i := 0; i < 12; i++ {
+		m.mcp.results = append(m.mcp.results, entry)
+	}
+	m.mcp.next = "cursor"
+	m.mcp.searched = true
 	return m
 }
 

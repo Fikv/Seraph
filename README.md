@@ -42,11 +42,36 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `a` / `y` | default agent / approval mode |
 | `m` | menu: keycap tiles for every action |
 | `s` | back to the start screen |
+| `c` | MCP servers: browse, install, test, configure |
 | `←→ ↑↓` | move between lanes and cards |
 
 Mouse works everywhere: click cards (click again or double-click to open), lane headers, key chips and menu tiles; the wheel scrolls.
 
 Lanes: **⟡ in flight** (working), **☩ needs you** (failed or stopped), **✦ ascended** (done).
+
+## MCP servers
+
+Press `c` on the board (or pick **C · MCP** in the menu) to manage MCP servers:
+
+- **Browse registry** searches the official MCP Registry. Pick a server, choose how to run it
+  (npm via `npx`, PyPI via `uvx`, Docker, or a remote HTTP/SSE endpoint), fill in the keys it
+  needs, and choose whether Claude, Cursor or both get it.
+- Installing downloads the server, runs a real MCP handshake and lists its tools.
+- **Installed** shows every server with its status and tools: `t` tests again, `1`/`2` toggle
+  Claude/Cursor, `d d` removes it.
+
+Seraph writes servers to Claude's user scope (`claude mcp add-json -s user`) and to
+`~/.cursor/mcp.json`, so workers and your own sessions see the same servers. Its own list lives
+in `~/.seraph/mcp.json` (mode 0600, since it can hold API keys).
+
+The same from the shell:
+
+```sh
+seraph mcp search github
+seraph mcp add io.github.domdomegg/filesystem-mcp
+seraph mcp add <name> -e API_KEY=... -no-cursor
+seraph mcp list | test <name> | rm <name>
+```
 
 ## How it works
 

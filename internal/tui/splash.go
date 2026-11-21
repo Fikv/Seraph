@@ -148,7 +148,7 @@ func (m *Model) panelLines() []string {
 	}
 	lines = append(lines,
 		divider,
-		key("n", "summon")+"   "+key("p", "plan")+"   "+key("a", "agent")+"   "+key("y", "mode")+"   "+key("q", "quit"),
+		key("n", "summon")+"   "+key("p", "plan")+"   "+key("c", "mcp")+"   "+key("a", "agent")+"   "+key("y", "mode")+"   "+key("q", "quit"),
 	)
 	return lines
 }

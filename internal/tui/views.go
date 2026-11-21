@@ -39,6 +39,8 @@ func (m *Model) screen() string {
 		return m.overlay(m.confirmView())
 	case scrMenu:
 		return m.overlay(m.menuView())
+	case scrMCP:
+		return m.mcpView()
 	}
 	return m.boardView()
 }
@@ -97,7 +99,7 @@ func (m *Model) boardView() string {
 	}
 
 	keys := hints(m.w,
-		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"),
+		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("c", "c", "mcp"),
 		m.chip("r", "r", "resume"), m.chip("x", "x", "stop"), m.chip("d", "d", "release"),
 		m.chip("a", "a", "agent"), m.chip("y", "y", "mode"), m.chip("q", "q", "quit"))
 	return m.header() + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys

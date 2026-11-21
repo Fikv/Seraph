@@ -21,6 +21,9 @@ func (Cursor) Args(s Spec) []string {
 	if s.ResumeID != "" {
 		args = append(args, "--resume", s.ResumeID)
 	}
+	if s.ApproveMCPs {
+		args = append(args, "--approve-mcps")
+	}
 	switch s.Approval {
 	case ApprovalYolo:
 		args = append(args, "--force")
