@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 
 	"seraph/internal/agent"
 	"seraph/internal/orch"
@@ -30,6 +31,7 @@ const (
 	scrPlanning
 	scrPlanReview
 	scrConfirm
+	scrMenu
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -91,11 +93,18 @@ type Model struct {
 	flashAt  time.Time
 
 	repoText string
+
+	hover       string
+	zoneIDs     []string
+	lastClick   string
+	lastClickAt time.Time
 }
 
 func Run(mgr *orch.Manager, opt Options) error {
 	m := newModel(mgr, opt)
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	zone.NewGlobal()
+	defer zone.Close()
+	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion()).Run()
 	return err
 }
 
@@ -195,6 +204,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.plan, m.planSel, m.scr = msg.tasks, 0, scrPlanReview
 		return m, nil
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			if m.planCancel != nil {
@@ -270,6 +281,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case scrPlanReview:
 		return m.reviewKey(key)
+	case scrMenu:
+		return m.menuKey(key)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -334,6 +347,10 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		m.ta.Reset()
 		m.ta.Placeholder = "describe the goal; the planner splits it into parallel workers…"
 		return m, m.ta.Focus()
+	case "m":
+		m.scr = scrMenu
+	case "s":
+		m.restartSplash()
 	case "a":
 		m.opt.Agent = agent.Next(m.opt.Agent)
 	case "y":

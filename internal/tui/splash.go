@@ -232,7 +232,7 @@ func place(bg []string, block string, x, y, w int) {
 			line = ansi.Truncate(line, w-x, "")
 			lw = ansi.StringWidth(line)
 		}
-		bg[row] = ansi.Cut(bg[row], 0, x) + line + "\x1b[0m" + ansi.Cut(bg[row], x+lw, w)
+		bg[row] = ansi.Cut(bg[row], 0, x) + "\x1b[0m" + line + "\x1b[0m" + ansi.Cut(bg[row], x+lw, w)
 	}
 }
 

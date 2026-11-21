@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"seraph/internal/store"
@@ -90,11 +91,30 @@ func approvalLabel(a string) string {
 	return sMint.Render("safe")
 }
 
+func clean(s string) string {
+	s = ansi.Strip(s)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if j := strings.LastIndexByte(l, '\r'); j >= 0 {
+			l = l[j+1:]
+		}
+		l = strings.ReplaceAll(l, "\t", "    ")
+		lines[i] = strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+				return -1
+			}
+			return r
+		}, l)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func trunc(s string, w int) string {
 	if w <= 1 {
 		return ""
 	}
-	s = strings.Join(strings.Fields(s), " ")
+	s = strings.Join(strings.Fields(clean(s)), " ")
 	return runewidth.Truncate(s, w, "…")
 }
 

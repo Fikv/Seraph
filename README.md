@@ -40,7 +40,11 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `r` | resume a stopped/failed worker |
 | `x` / `d` | stop / release a worker |
 | `a` / `y` | default agent / approval mode |
+| `m` | menu: keycap tiles for every action |
+| `s` | back to the start screen |
 | `←→ ↑↓` | move between lanes and cards |
+
+Mouse works everywhere: click cards (click again or double-click to open), lane headers, key chips and menu tiles; the wheel scrolls.
 
 Lanes: **⟡ in flight** (working), **☩ needs you** (failed or stopped), **✦ ascended** (done).
 
