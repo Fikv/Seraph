@@ -61,9 +61,7 @@ func (m *Model) overlay(box string) string {
 
 func (m *Model) header() string {
 	left := spinTitle() + "  " + m.projectLabel() + "  " + sDim.Render(m.repoText)
-	if m.scr == scrBoard && m.bigBanner() {
-		left = m.projectLabel() + "  " + sDim.Render(m.repoText)
-	}
+
 	ls := m.lanes()
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
@@ -100,9 +98,9 @@ func hints(width int, items ...string) string {
 func (m *Model) boardView() string {
 	top := m.header()
 	bodyH := max(m.h-5, 4)
-	if m.bigBanner() {
-		top = m.banner() + "\n" + top
-		bodyH = max(m.h-8, 4)
+	if m.cornerEmblem() {
+		top = m.emblemHeader()
+		bodyH = max(m.h-9, 4)
 	}
 	ls := m.lanes()
 

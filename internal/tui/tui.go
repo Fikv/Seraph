@@ -73,6 +73,7 @@ type Model struct {
 	frame       int
 	splashStart time.Time
 	splashDone  bool
+	emblemStart time.Time
 	lastRefresh time.Time
 	versions    map[string]string
 
@@ -185,6 +186,9 @@ func tick(d time.Duration) tea.Cmd {
 func (m *Model) tickEvery() time.Duration {
 	if m.scr == scrSplash {
 		return 33 * time.Millisecond
+	}
+	if m.scr == scrBoard && m.cornerEmblem() {
+		return 66 * time.Millisecond
 	}
 	return 110 * time.Millisecond
 }
@@ -350,6 +354,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.scr = scrBoard
+		m.emblemStart = time.Now()
 		return m, nil
 	case scrBoard:
 		return m.boardKey(key)

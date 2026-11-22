@@ -303,22 +303,43 @@ func TestSpinStarCycles(t *testing.T) {
 	}
 }
 
-func TestWordmark(t *testing.T) {
-	rows := wordmarkRows()
-	for i, r := range rows {
-		if w := ansi.StringWidth(r); w != ansi.StringWidth(rows[0]) {
-			t.Fatalf("row %d is %d wide, row 0 is %d", i, w, ansi.StringWidth(rows[0]))
+func TestEmblem(t *testing.T) {
+	built := emblem(3 * time.Second)
+	if len(built) != emblemH {
+		t.Fatalf("rows = %d", len(built))
+	}
+	for i, r := range built {
+		if w := ansi.StringWidth(r); w != emblemW {
+			t.Fatalf("row %d is %d wide, want %d", i, w, emblemW)
 		}
 	}
+	plain := ansi.Strip(strings.Join(built, "\n"))
+	if !strings.Contains(plain, "┏━━╸ ┏━━╸ ┏━━┓ ┏━━┓ ┏━━┓ ╻  ╻") || !strings.Contains(plain, "─") {
+		t.Fatalf("emblem word or orbit missing:\n%s", plain)
+	}
+	if early := ansi.Strip(strings.Join(emblem(-time.Second), "")); strings.TrimSpace(early) != "" {
+		t.Fatalf("before the build everything should be blank: %q", early)
+	}
+	stars := 0
+	for _, ms := range []int{1500, 2500, 3500, 4500, 5500} {
+		p := ansi.Strip(strings.Join(emblem(time.Duration(ms)*time.Millisecond), ""))
+		if strings.ContainsAny(p, "✦✶✕") {
+			stars++
+		}
+	}
+	if stars < 3 {
+		t.Fatalf("the star should be visible most of the lap, seen in %d/5 frames", stars)
+	}
+
 	m := testModel(t)
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
 	m.scr = scrBoard
-	out := ansi.Strip(m.View())
-	if !strings.Contains(out, "╭───╴  ╭───╴  ╭───╮") {
-		t.Fatalf("banner missing on a large board:\n%s", out[:min(len(out), 600)])
+	m.emblemStart = time.Now().Add(-5 * time.Second)
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "┏━━╸ ┏━━╸") || !strings.Contains(out, "ORCHESTRATE THE CHOIR") {
+		t.Fatal("board should show the corner emblem on a large terminal")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if out := ansi.Strip(m.View()); strings.Contains(out, "╭───╴  ╭───╴") || !strings.Contains(out, "SERAPH") {
-		t.Fatal("small screens should use the compact header")
+	if out := ansi.Strip(m.View()); strings.Contains(out, "┏━━╸ ┏━━╸") || !strings.Contains(out, "SERAPH") {
+		t.Fatal("small terminals should use the compact header")
 	}
 }
