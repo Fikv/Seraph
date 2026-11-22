@@ -50,6 +50,12 @@ type SpawnOpts struct {
 	Dir       string
 	ProjectID string
 	TodoID    string
+	MissionID string
+	NodeID    string
+	FromRef   string
+	Shared    bool
+	Branch    string
+	Base      string
 }
 
 const (
@@ -76,6 +82,8 @@ type Manager struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	sched     scheduler
+	mmu       sync.Mutex
+	halting   bool
 }
 
 func New(st *store.Store, b *bus.Bus) (*Manager, error) {
@@ -280,6 +288,8 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 		Dir:       o.Dir,
 		ProjectID: o.ProjectID,
 		TodoID:    o.TodoID,
+		MissionID: o.MissionID,
+		NodeID:    o.NodeID,
 		Status:    store.StatusQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -287,9 +297,13 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 	if s.Title == "" {
 		s.Title = titleFrom(o.Task)
 	}
-	if o.Repo != "" {
-		s.Base = workspace.CurrentBranch(o.Repo)
-		dir, branch, err := workspace.Create(store.Home(), o.Repo, s.ID)
+	switch {
+	case o.Shared:
+		s.Branch, s.Base = o.Branch, o.Base
+	case o.Repo != "":
+		ref := firstNonEmpty(o.FromRef, "HEAD")
+		s.Base = firstNonEmpty(o.FromRef, workspace.CurrentBranch(o.Repo))
+		dir, branch, err := workspace.CreateFrom(store.Home(), o.Repo, s.ID, ref)
 		if err != nil {
 			return "", err
 		}
@@ -311,7 +325,7 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 	m.localLog[s.ID] = true
 	m.mu.Unlock()
 
-	m.start(s.ID, o.Task, "")
+	m.start(s.ID, o.Task, "", false)
 	return s.ID, nil
 }
 
@@ -338,7 +352,48 @@ func (m *Manager) Followup(id, prompt string) error {
 	if _, err := os.Stat(s.Dir); err != nil {
 		return fmt.Errorf("workspace is gone: %s", s.Dir)
 	}
-	m.start(id, prompt, resume)
+	m.start(id, prompt, resume, false)
+	return nil
+}
+
+const explainPrompt = `You are the Seraph worker that made the changes on branch %s, now answering the user's questions about them.
+Explain what changed and why, referring to concrete files and lines. Read files if you need to.
+Do not modify, create or delete any files, and do not run git commands that change anything.`
+
+func (m *Manager) Ask(id, question, file string, hunk string) error {
+	m.mu.Lock()
+	s, ok := m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("no session %s", id)
+	}
+	if _, running := m.cancels[id]; running {
+		m.mu.Unlock()
+		return errors.New("the worker is still running; wait for it to finish before asking")
+	}
+	resume, dir := s.AgentSessionID, s.Dir
+	m.mu.Unlock()
+	if m.RunningElsewhere(id) {
+		return errors.New("the worker is running in another seraph process")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("the worktree is gone (%s), so the agent cannot be resumed there", dir)
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		question = "Explain what happened here and why you made this change."
+	}
+	prompt := question
+	if hunk != "" {
+		prompt += "\n\nThis is about " + file + ":\n```diff\n" + hunk + "\n```"
+	} else if file != "" {
+		prompt += "\n\nThis is about the changes in " + file + "."
+	}
+	m.Log(id)
+	m.mu.Lock()
+	m.localLog[id] = true
+	m.mu.Unlock()
+	m.start(id, prompt, resume, true)
 	return nil
 }
 
@@ -358,6 +413,7 @@ func (m *Manager) Stop(id string) {
 
 func (m *Manager) StopAll() {
 	m.mu.Lock()
+	m.halting = true
 	for _, c := range m.cancels {
 		c()
 	}
@@ -409,11 +465,12 @@ func (m *Manager) Remove(id string) error {
 	return nil
 }
 
-func (m *Manager) start(id, prompt, resume string) {
+func (m *Manager) start(id, prompt, resume string, ask bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
 	s := m.sessions[id]
 	m.cancels[id] = cancel
+	prevStatus, prevErr := s.Status, s.Error
 	s.Status = store.StatusWorking
 	s.Error = ""
 	s.Turns++
@@ -436,8 +493,17 @@ func (m *Manager) start(id, prompt, resume string) {
 		Approval:     agent.Approval(snapshot.Approval),
 		SystemPrompt: fmt.Sprintf(workerPrompt, branchOr(snapshot.Branch)),
 	}
+	if snapshot.NodeID != "" {
+		sys, dirs := m.nodeSystem(snapshot)
+		spec.SystemPrompt = sys
+		spec.AddDirs = append(spec.AddDirs, dirs...)
+	}
+	if ask {
+		spec.Approval = agent.ApprovalAsk
+		spec.SystemPrompt = fmt.Sprintf(explainPrompt, branchOr(snapshot.Branch))
+	}
 	if dirs, extra := m.projectContext(snapshot.ProjectID); extra != "" {
-		spec.AddDirs = dirs
+		spec.AddDirs = append(spec.AddDirs, dirs...)
 		spec.SystemPrompt += "\n" + extra
 	}
 	if cfg, err := mcp.Load(m.st); err == nil {
@@ -455,7 +521,8 @@ func (m *Manager) start(id, prompt, resume string) {
 			}
 			m.record(id, ev)
 		})
-		if err == nil && !resultErr && snapshot.Worktree {
+		writes := snapshot.Worktree || (snapshot.MissionID != "" && snapshot.Branch != "" && spec.Approval != agent.ApprovalReadOnly)
+		if err == nil && !resultErr && writes && !ask {
 			m.commit(id, snapshot, prompt)
 		}
 
@@ -480,6 +547,9 @@ func (m *Manager) start(id, prompt, resume string) {
 		default:
 			s.Status = store.StatusDone
 		}
+		if ask && err == nil && !resultErr && prevStatus != store.StatusWorking && prevStatus != store.StatusQueued {
+			s.Status, s.Error = prevStatus, prevErr
+		}
 		s.UpdatedAt = time.Now()
 		snapshot := *s
 		m.mu.Unlock()
@@ -487,10 +557,13 @@ func (m *Manager) start(id, prompt, resume string) {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			m.record(id, agent.Event{Kind: agent.KindError, Text: err.Error(), Time: time.Now()})
 		}
-		if snapshot.TodoID != "" {
+		if snapshot.TodoID != "" && !ask {
 			m.todoSessionEnded(snapshot.TodoID, id, snapshot.Status, snapshot.Error)
 		}
 		m.publish(id, true)
+		if snapshot.MissionID != "" && !ask {
+			m.nodeSessionEnded(snapshot)
+		}
 	}()
 }
 
@@ -513,6 +586,10 @@ func (m *Manager) commit(id string, s store.Session, prompt string) {
 }
 
 func (m *Manager) record(id string, ev agent.Event) {
+	if ev.Kind == agent.KindLimits {
+		m.saveLimits(id, ev.Limits)
+		return
+	}
 	m.mu.Lock()
 	s := m.sessions[id]
 	if s == nil {
@@ -656,4 +733,32 @@ func branchOr(b string) string {
 		return "(no worktree: shared directory)"
 	}
 	return b
+}
+
+func limitsKey(agentName string) string { return "limits:" + agentName }
+
+func (m *Manager) saveLimits(sessionID string, ls []agent.Limit) {
+	m.mu.Lock()
+	s := m.sessions[sessionID]
+	m.mu.Unlock()
+	name := "claude"
+	if s != nil {
+		name = s.Agent
+	}
+	data, err := json.Marshal(agent.Limits{Agent: name, Windows: ls, Captured: time.Now()})
+	if err == nil {
+		_ = m.st.SetSetting(limitsKey(name), string(data))
+	}
+}
+
+func (m *Manager) Limits(agentName string) (agent.Limits, bool) {
+	raw := m.st.Setting(limitsKey(agentName))
+	if raw == "" {
+		return agent.Limits{}, false
+	}
+	var l agent.Limits
+	if json.Unmarshal([]byte(raw), &l) != nil {
+		return agent.Limits{}, false
+	}
+	return l, true
 }

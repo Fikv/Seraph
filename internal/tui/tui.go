@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -35,6 +37,10 @@ const (
 	scrMCP
 	scrProjects
 	scrTodos
+	scrNotes
+	scrDiff
+	scrModels
+	scrMissions
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -59,6 +65,7 @@ type Options struct {
 	SkipSplash bool
 	Version    string
 	Storage    string
+	AgentSet   bool
 	Updates    <-chan string
 }
 
@@ -71,6 +78,8 @@ type Model struct {
 	frame       int
 	splashStart time.Time
 	splashDone  bool
+	emblemStart time.Time
+	logoStyle   string
 	lastRefresh time.Time
 	versions    map[string]string
 
@@ -104,20 +113,28 @@ type Model struct {
 
 	mcp *mcpState
 
-	project      *store.Project
-	projects     []store.Project
-	projSel      int
-	projForm     *projectForm
-	projRemoving string
-	todos        []store.Todo
-	todosAt      time.Time
-	todoCol      int
-	todoIdx      [5]int
-	todoForm     *todoForm
-	todoRemoving string
-	todoSelID    string
-	notesCache   map[string]notesEntry
-	backTo       screen
+	project        *store.Project
+	projects       []store.Project
+	projSel        int
+	projForm       *projectForm
+	projRemoving   string
+	todos          []store.Todo
+	todosAt        time.Time
+	todoCol        int
+	todoIdx        [5]int
+	todoForm       *todoForm
+	todoRemoving   string
+	todoSelID      string
+	notesCache     map[string]notesEntry
+	backTo         screen
+	notes          *notesState
+	picker         *modelPicker
+	missions       *missionsState
+	cursorModels   []agent.Model
+	catalogLoading bool
+	catalogErr     string
+	cursorPlan     string
+	diff           *diffState
 
 	hover       string
 	zoneIDs     []string
@@ -157,6 +174,13 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 
 	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20)}
 	m.loadCurrentProject()
+	m.logoStyle = logoStyleFor(mgr.Store().Setting(LogoStyleSetting))
+	if !opt.AgentSet {
+		if a := mgr.Store().Setting(DefaultAgentSetting); a == "claude" || a == "cursor" {
+			m.opt.Agent = a
+			m.opt.Model = mgr.Store().Setting(DefaultModelSetting)
+		}
+	}
 	m.repoText = m.repoLabel()
 	if opt.SkipSplash {
 		m.scr = scrBoard
@@ -182,11 +206,14 @@ func (m *Model) tickEvery() time.Duration {
 	if m.scr == scrSplash {
 		return 33 * time.Millisecond
 	}
+	if m.scr == scrBoard && m.cornerEmblem() {
+		return 66 * time.Millisecond
+	}
 	return 110 * time.Millisecond
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(tick(m.tickEvery()), m.probeVersions(), waitBus(m.opt.Updates))
+	return tea.Batch(tick(m.tickEvery()), m.probeVersions(), waitBus(m.opt.Updates), m.loadCatalog(), m.probePlan())
 }
 
 func waitBus(ch <-chan string) tea.Cmd {
@@ -269,6 +296,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mgr.Refresh()
 		m.lastRefresh = time.Now()
 		return m, waitBus(m.opt.Updates)
+	case catalogMsg:
+		m.catalogLoading = false
+		if msg.err != nil {
+			m.catalogErr = msg.err.Error()
+		} else {
+			m.cursorModels, m.catalogErr = msg.models, ""
+			if m.picker != nil {
+				m.applyModelFilter()
+			}
+		}
+		return m, nil
+	case cursorPlanMsg:
+		m.cursorPlan = string(msg)
+		return m, nil
 	case versionsMsg:
 		m.versions = msg
 		return m, nil
@@ -311,7 +352,7 @@ func (m *Model) modalWidth() int { return min(max(m.w-6, 30), 96) }
 func (m *Model) lanes() [laneCount][]store.Session {
 	var out [laneCount][]store.Session
 	for _, s := range m.mgr.Sessions() {
-		if m.project != nil && s.ProjectID != m.project.ID {
+		if (m.project != nil && s.ProjectID != m.project.ID) || s.MissionID != "" {
 			continue
 		}
 		l := laneOf(s)
@@ -346,6 +387,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.scr = scrBoard
+		m.emblemStart = time.Now()
 		return m, nil
 	case scrBoard:
 		return m.boardKey(key)
@@ -372,6 +414,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.projectsKey(k)
 	case scrTodos:
 		return m.todosKey(k)
+	case scrNotes:
+		return m.notesKey(k)
+	case scrDiff:
+		return m.diffKey(k)
+	case scrModels:
+		return m.modelsKey(k)
+	case scrMissions:
+		return m.missionsKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -443,12 +493,20 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		return m, m.ta.Focus()
 	case "m":
 		m.scr = scrMenu
+	case "o":
+		return m, m.openNotesBrowser()
+	case "v":
+		if s, ok := m.selected(); ok {
+			return m, m.openDiff(s.ID, scrBoard)
+		}
 	case "c":
 		return m, m.openMCP()
 	case "s":
 		m.restartSplash()
 	case "a":
-		m.opt.Agent = agent.Next(m.opt.Agent)
+		return m, m.openModelPicker(scrBoard, m.setDefaultModel)
+	case "M":
+		return m, m.openMissions("")
 	case "y":
 		m.toggleApproval()
 	case "x":
@@ -522,10 +580,20 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.fi.Blur()
 		m.scr = scrBoard
-		if m.backTo == scrTodos {
-			m.scr, m.backTo = scrTodos, scrBoard
+		switch m.backTo {
+		case scrTodos:
+			m.scr = scrTodos
 			m.reloadTodos()
+		case scrDiff:
+			m.scr = scrDiff
+			m.reloadDiff()
+		case scrMissions:
+			if m.missions != nil {
+				m.scr = scrMissions
+				m.reloadMissions(true)
+			}
 		}
+		m.backTo = scrBoard
 		return m, nil
 	case "enter":
 		text := strings.TrimSpace(m.fi.Value())
@@ -543,6 +611,9 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mgr.Stop(m.openID)
 		m.setFlash("stopping "+m.openID, false)
 		return m, nil
+	case "ctrl+g":
+		m.fi.Blur()
+		return m, m.openDiff(m.openID, scrDetail)
 	case "ctrl+r":
 		if err := m.mgr.Followup(m.openID, continuePrompt); err != nil {
 			m.setFlash(err.Error(), true)
@@ -571,8 +642,12 @@ func (m *Model) composeKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scr = scrBoard
 		return m, nil
 	case "tab":
-		m.opt.Agent = agent.Next(m.opt.Agent)
-		return m, nil
+		back := m.scr
+		m.ta.Blur()
+		return m, m.openModelPicker(back, func(md agent.Model) {
+			m.setDefaultModel(md)
+			m.ta.Focus()
+		})
 	case "ctrl+y":
 		m.toggleApproval()
 		return m, nil
@@ -702,4 +777,33 @@ func (m *Model) repoLabel() string {
 		return "no repo · " + filepath.Base(m.opt.Dir)
 	}
 	return filepath.Base(r) + " ⎇ " + workspace.CurrentBranch(r)
+}
+
+type cursorPlanMsg string
+
+func (m *Model) probePlan() tea.Cmd {
+	c := m.cache()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if v, ok := c.CacheGet(ctx, "cursor:plan"); ok {
+			return cursorPlanMsg(v)
+		}
+		bin, err := agent.Locate(agent.Cursor{})
+		if err != nil {
+			return nil
+		}
+		out, err := exec.CommandContext(ctx, bin, "about", "--format", "json").Output()
+		if err != nil {
+			return nil
+		}
+		var about struct {
+			Tier string `json:"subscriptionTier"`
+		}
+		if json.Unmarshal(out, &about) != nil || about.Tier == "" {
+			return nil
+		}
+		c.CacheSet(ctx, "cursor:plan", "plan "+about.Tier, time.Hour)
+		return cursorPlanMsg("plan " + about.Tier)
+	}
 }

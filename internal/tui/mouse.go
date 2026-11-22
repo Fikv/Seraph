@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -116,6 +117,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case "menu":
 		m.scr = scrBoard
 		return m.handleKey(keyMsg(arg))
+	case "mission", "mnode", "role":
+		return m.missionClick(kind, arg)
 	case "mcptab", "mcp", "mcpres", "form", "formopt":
 		if m.mcp != nil {
 			return m.mcpClick(kind, arg)
@@ -125,6 +128,24 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.projectClick(kind, n)
 	case "todo", "tcol", "tform":
 		return m.todoClick(kind, arg)
+	case "note":
+		if m.notes != nil {
+			return m.notesClick(arg)
+		}
+	case "notelink":
+		if m.notes != nil {
+			var i int
+			fmt.Sscanf(arg, "%d", &i)
+			if i < len(m.notes.links) {
+				m.followLink(m.notes.links[i])
+			}
+		}
+	case "model":
+		return m.modelClick(arg)
+	case "dfile", "hunk":
+		if m.diff != nil {
+			return m.diffClick(kind, arg)
+		}
 	}
 	return m, nil
 }
@@ -139,6 +160,30 @@ func (m *Model) wheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
+	case scrNotes:
+		if m.notes != nil && (m.notes.focus == 1 || m.zoneAt(msg) == "notesprev") {
+			var cmd tea.Cmd
+			m.notes.vp, cmd = m.notes.vp.Update(msg)
+			return m, cmd
+		}
+		return m.handleKey(keyMsg(dir))
+	case scrDiff:
+		if m.diff != nil && !strings.HasPrefix(m.zoneAt(msg), "dfile:") {
+			if dir == "up" {
+				m.diff.scroll = max(m.diff.scroll-3, 0)
+			} else {
+				m.diff.scroll += 3
+			}
+			return m, nil
+		}
+		return m.handleKey(keyMsg(dir))
+	case scrMissions:
+		if m.missions != nil && m.missions.mode == mmArtifact {
+			var cmd tea.Cmd
+			m.missions.vp, cmd = m.missions.vp.Update(msg)
+			return m, cmd
+		}
+		return m.handleKey(keyMsg(dir))
 	case scrBoard, scrPlanReview, scrMCP, scrProjects, scrTodos:
 		return m.handleKey(keyMsg(dir))
 	}
@@ -186,12 +231,15 @@ func (m *Model) menuItems() [][]menuItem {
 		{
 			{"x", "X", "stop", running},
 			{"d", "D", "release", hasSel},
-			{"a", "A", "agent: " + m.opt.Agent, true},
+			{"a", "A", "model", true},
 			{"y", "Y", "mode: " + string(m.opt.Approval), true},
 		},
 		{
 			{"g", "G", "projects", true},
+			{"o", "O", "notes", true},
+			{"v", "V", "diff", hasSel},
 			{"t", "T", "todo board", m.project != nil},
+			{"M", "M", "missions", true},
 			{"c", "C", "MCP servers", true},
 			{"s", "S", "start screen", true},
 			{"esc", "ESC", "close", true},

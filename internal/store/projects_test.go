@@ -55,3 +55,37 @@ func TestProjectsAndTodos(t *testing.T) {
 		t.Fatal("current project setting must be cleared")
 	}
 }
+
+func TestMissionsAndNodes(t *testing.T) {
+	st := open(t)
+	m := Mission{ID: "m1", Title: "BLIK", Goal: "add BLIK", Repo: "/r", Phase: PhaseSpec, State: MissionRunning, TodoID: "t1"}
+	if err := st.SaveMission(m); err != nil {
+		t.Fatal(err)
+	}
+	n := Node{ID: "n1", MissionID: "m1", Role: RoleDev, Title: "api", Files: []string{"api/**"}, Deps: []string{"n0"}, Status: NodePending, Position: 3}
+	if err := st.SaveNode(n); err != nil {
+		t.Fatal(err)
+	}
+	st.Save(Session{ID: "s1", Title: "x", Task: "x", Agent: "claude", Status: StatusDone, MissionID: "m1", NodeID: "n1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	got, ok, _ := st.MissionForTodo("t1")
+	if !ok || got.Phase != PhaseSpec || !got.Active() {
+		t.Fatalf("mission = %+v", got)
+	}
+	ns, _ := st.Nodes("m1")
+	if len(ns) != 1 || ns[0].Files[0] != "api/**" || ns[0].Deps[0] != "n0" || ns[0].Role != RoleDev {
+		t.Fatalf("nodes = %+v", ns)
+	}
+	s, _, _ := st.Get("s1")
+	if s.MissionID != "m1" || s.NodeID != "n1" {
+		t.Fatalf("session = %+v", s)
+	}
+	if err := st.DeleteMission("m1"); err != nil {
+		t.Fatal(err)
+	}
+	if ns, _ := st.Nodes("m1"); len(ns) != 0 {
+		t.Fatal("nodes must cascade")
+	}
+	if s, _, _ := st.Get("s1"); s.MissionID != "" {
+		t.Fatal("session must be detached")
+	}
+}

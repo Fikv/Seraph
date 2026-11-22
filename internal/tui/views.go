@@ -10,6 +10,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"seraph/internal/agent"
+	"seraph/internal/md"
 	"seraph/internal/store"
 	t "seraph/internal/theme"
 )
@@ -44,6 +45,14 @@ func (m *Model) screen() string {
 		return m.mcpView()
 	case scrProjects:
 		return m.projectsView()
+	case scrNotes:
+		return m.notesView()
+	case scrModels:
+		return m.overlay(m.modelPickerView())
+	case scrMissions:
+		return m.missionsView()
+	case scrDiff:
+		return m.diffView()
 	case scrTodos:
 		return m.todosView()
 	}
@@ -55,12 +64,20 @@ func (m *Model) overlay(box string) string {
 }
 
 func (m *Model) header() string {
-	left := sGoldB.Render("✧ SERAPH") + "  " + m.projectLabel() + "  " + sDim.Render(m.repoText)
+	left := spinTitle() + "  " + m.projectLabel() + "  " + sDim.Render(m.repoText)
+
 	ls := m.lanes()
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
 		sGold.Render(fmt.Sprintf("✦ %d", len(ls[laneAscended])))
-	right := agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
+	if active, waiting := m.activeMissions(); active > 0 {
+		mc := sLavender.Render(fmt.Sprintf("⟁ %d", active))
+		if waiting > 0 {
+			mc += sGold.Render(fmt.Sprintf(" ⏸%d", waiting))
+		}
+		counts = mc + "  " + counts
+	}
+	right := m.modelLabel() + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
 	if lipgloss.Width(right) > m.w/2 {
 		right = counts
 	}
@@ -90,7 +107,12 @@ func hints(width int, items ...string) string {
 }
 
 func (m *Model) boardView() string {
+	top := m.header()
 	bodyH := max(m.h-5, 4)
+	if m.cornerEmblem() {
+		top = m.emblemHeader()
+		bodyH = max(m.h-m.logoLines()-4, 4)
+	}
 	ls := m.lanes()
 
 	var body string
@@ -110,15 +132,15 @@ func (m *Model) boardView() string {
 	}
 
 	keys := hints(m.w,
-		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("c", "c", "mcp"),
+		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("o", "o", "notes"), m.chip("v", "v", "diff"), m.chip("c", "c", "mcp"),
 		m.chip("r", "r", "resume"), m.chip("x", "x", "stop"), m.chip("d", "d", "release"),
 		m.chip("a", "a", "agent"), m.chip("y", "y", "mode"), m.chip("q", "q", "quit"))
-	return m.header() + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
+	return top + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
 }
 
 func (m *Model) emptyView(h int) string {
 	msg := lipgloss.JoinVertical(lipgloss.Center,
-		sGold.Render("✧  the heavens are quiet  ✧"),
+		sGold.Render(spinNow(false)+"  the heavens are quiet  "+spinNow(true)),
 		"",
 		sDim.Render("press ")+sGold.Render("n")+sDim.Render(" to summon a worker or ")+sGold.Render("p")+sDim.Render(" to divine a plan"),
 	)
@@ -246,7 +268,7 @@ func (m *Model) detailView() string {
 		info3 = sRose.Render("✗ " + trunc(s.Error, m.w-3))
 	}
 
-	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), key("↑↓ wheel", "scroll"),
+	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), m.chip("ctrl+g", "ctrl+g", "diff"), key("↑↓ wheel", "scroll"),
 		m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
 	return strings.Join([]string{
 		m.header(),
@@ -272,12 +294,12 @@ func renderTranscript(evs []agent.Event, agentName string, width int) string {
 		switch ev.Kind {
 		case agent.KindUser:
 			b.WriteString("\n" + sLavender.Bold(true).Render("☩ you") + "\n")
-			b.WriteString(wrap(sIvory, ev.Text) + "\n")
+			b.WriteString(md.Render(ev.Text, w) + "\n")
 		case agent.KindText:
 			if prev != agent.KindText {
 				b.WriteString("\n" + sGoldB.Render("✧ "+agentName) + "\n")
 			}
-			b.WriteString(wrap(sIvory, ev.Text) + "\n")
+			b.WriteString(md.Render(ev.Text, w) + "\n")
 		case agent.KindThinking:
 			text := strings.TrimSpace(ev.Text)
 			if r := []rune(text); len(r) > 600 {
@@ -323,13 +345,14 @@ func (m *Model) targetLine() string {
 }
 
 func (m *Model) composeView(title, submit string) string {
-	opts := sDim.Render("agent ") + m.chip("tab", "tab", "") + " " + m.mark("key:tab", agentLabel(m.opt.Agent)) +
+	opts := sDim.Render("model ") + m.chip("tab", "tab", "") + " " + m.mark("key:tab", m.modelLabel()) +
 		sDim.Render("     mode ") + m.chip("ctrl+y", "ctrl+y", "") + " " + m.mark("key:ctrl+y", approvalLabel(string(m.opt.Approval)))
 	body := strings.Join([]string{
 		m.ta.View(),
 		"",
 		opts,
 		m.targetLine(),
+		m.limitsLine(m.modalWidth() - 4),
 		"",
 		hints(m.modalWidth()-4, m.chip("enter", "⏎", submit), m.chip("alt+enter", "alt+⏎", "newline"), m.chip("esc", "esc", "cancel")),
 	}, "\n")
@@ -340,7 +363,7 @@ func (m *Model) planningView() string {
 	el := time.Since(m.planStart).Round(time.Second)
 	spin := sparkle[(m.frame/3)%len(sparkle)]
 	body := sGoldB.Render(spin+" the choir deliberates "+spin) + "\n\n" +
-		sDim.Render("planner ") + agentLabel(m.opt.Agent) + sDim.Render(fmt.Sprintf(" · read-only · %s", el)) + "\n\n" +
+		sDim.Render("planner ") + m.modelLabel() + sDim.Render(fmt.Sprintf(" · read-only · %s", el)) + "\n\n" +
 		sIvory.Render(trunc(m.planGoal, m.modalWidth()-6)) + "\n\n" +
 		hints(m.modalWidth()-4, m.chip("esc", "esc", "cancel"))
 	return modal("✦ DIVINING", body, m.modalWidth())

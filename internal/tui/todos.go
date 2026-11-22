@@ -28,6 +28,7 @@ type todoForm struct {
 	body     textarea.Model
 	repo     int
 	agent    string
+	model    string
 	priority int
 	focus    int
 	err      string
@@ -187,6 +188,11 @@ func (m *Model) todosKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg := ""
 	switch key {
 	case "enter", "p":
+		if td.Status == store.TodoDoing || td.Status == store.TodoReview || td.Status == store.TodoDone {
+			if ms, ok, _ := m.mgr.Store().MissionForTodo(td.ID); ok {
+				return m, m.openMissions(ms.ID)
+			}
+		}
 		if td.Status == store.TodoDoing || td.Status == store.TodoReview {
 			if td.SessionID != "" {
 				if _, exists := m.mgr.Get(td.SessionID); exists {
@@ -205,6 +211,14 @@ func (m *Model) todosKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		msg = "processing " + td.Title + " → worker " + id
 	case "e":
 		return m, m.openTodoForm(&td)
+	case "v":
+		if td.SessionID != "" {
+			if _, exists := m.mgr.Get(td.SessionID); exists {
+				return m, m.openDiff(td.SessionID, scrTodos)
+			}
+		}
+		m.setFlash("this todo has no worker yet", true)
+		return m, nil
 	case "u":
 		switch td.Status {
 		case store.TodoOpen:
@@ -296,7 +310,7 @@ func (m *Model) openTodoForm(td *store.Todo) tea.Cmd {
 		f.editing, f.original = td.ID, *td
 		f.title.SetValue(td.Title)
 		f.body.SetValue(td.Body)
-		f.agent, f.priority = td.Agent, td.Priority
+		f.agent, f.model, f.priority = td.Agent, td.Model, td.Priority
 		for i, r := range m.project.Repos {
 			if r == td.Repo {
 				f.repo = i + 1
@@ -317,16 +331,6 @@ func (f *todoForm) focusCurrent() tea.Cmd {
 		return f.body.Focus()
 	}
 	return nil
-}
-
-func nextAgentOrDefault(a string) string {
-	names := append([]string{""}, agent.Names()...)
-	for i, n := range names {
-		if n == a {
-			return names[(i+1)%len(names)]
-		}
-	}
-	return ""
 }
 
 func (m *Model) todoFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -370,7 +374,15 @@ func (m *Model) todoFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				f.repo = (f.repo + 1) % n
 			}
 		case tfAgent:
-			f.agent = nextAgentOrDefault(f.agent)
+			if back {
+				f.agent, f.model = "", ""
+				return m, nil
+			}
+			return m, m.openModelPicker(scrTodos, func(md agent.Model) {
+				if m.todoForm != nil {
+					m.todoForm.agent, m.todoForm.model = md.Agent, md.ID
+				}
+			})
 		case tfPriority:
 			if back {
 				f.priority = (f.priority + 3) % 4
@@ -399,7 +411,7 @@ func (m *Model) saveTodoForm() (tea.Model, tea.Cmd) {
 	}
 	td.Title = strings.TrimSpace(f.title.Value())
 	td.Body = strings.TrimSpace(f.body.Value())
-	td.Agent, td.Priority = f.agent, f.priority
+	td.Agent, td.Model, td.Priority = f.agent, f.model, f.priority
 	td.Repo = ""
 	if f.repo > 0 && f.repo <= len(m.project.Repos) {
 		td.Repo = m.project.Repos[f.repo-1]
@@ -494,7 +506,7 @@ func (m *Model) todosView() string {
 		sDim.Render(fmt.Sprintf("max %d parallel · scheduler on", m.project.MaxParallel))
 	head = lipgloss.NewStyle().MaxWidth(m.w).Render(head)
 	keys := hints(m.w, m.chip("n", "n", "new"), m.chip("enter", "⏎", "process/open"), m.chip("u", "u", "queue"),
-		m.chip("U", "U", "queue all"), m.chip("a", "a", "accept"), m.chip("r", "r", "retry"), m.chip("e", "e", "edit"),
+		m.chip("U", "U", "queue all"), m.chip("a", "a", "accept"), m.chip("r", "r", "retry"), m.chip("e", "e", "edit"), m.chip("v", "v", "diff"),
 		m.chip("<", "<", ""), m.chip(">", ">", "move"), m.chip("+", "+", "prio"), m.chip("o", "o", "notes"),
 		m.chip("d", "d", "delete"), m.chip("esc", "esc", "back"))
 	screen := m.header() + "\n" + head + "\n" + rule(m.w) + "\n" +
@@ -558,16 +570,23 @@ func (m *Model) todoFormView() string {
 	if f.repo > 0 && f.repo <= len(m.project.Repos) {
 		repo = sIvory.Render(tildeHome(m.project.Repos[f.repo-1]))
 	}
-	ag := sDim.Render("project default")
+	ag := sDim.Render("project default") + sFaint.Render("  ⏎ pick · ← clear")
 	if f.agent != "" {
-		ag = agentLabel(f.agent)
+		provider := "Anthropic"
+		if f.agent == "cursor" {
+			provider = agent.ProviderOf(f.model)
+			if f.model == "" {
+				provider = "Cursor"
+			}
+		}
+		ag = agentLabel(f.agent) + sDim.Render(" · ") + sIvory.Render(trunc(m.modelName(f.agent, f.model), 26)) + " " + providerBadge(provider)
 	}
 	prio := []string{"none", "low", "medium", "high"}[f.priority]
 	lines := []string{
 		label(tfTitle, "title"), f.title.View(),
 		label(tfBody, "details"), f.body.View(), "",
 		choice(tfRepo, label(tfRepo, "repo      ")+repo),
-		choice(tfAgent, label(tfAgent, "agent     ")+ag),
+		choice(tfAgent, label(tfAgent, "model     ")+ag),
 		choice(tfPriority, label(tfPriority, "priority  ")+sIvory.Render(prio)+" "+priorityMark(f.priority)),
 		"",
 	}

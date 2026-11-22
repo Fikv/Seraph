@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"seraph/internal/mcp"
 	"seraph/internal/orch"
 	"seraph/internal/store"
+	"seraph/internal/workspace"
 )
 
 func testModel(t *testing.T) *Model {
@@ -98,6 +100,29 @@ func testModel(t *testing.T) *Model {
 		}
 	}
 	m.loadProjects()
+	seedMissions(t, st, notes, repo)
+	m.cursorModels = agent.ParseCursorModels("auto - Auto (default)\ngpt-5.3-codex-high - Codex 5.3 High\nclaude-opus-5-5-high - Claude Opus 5.5 1M High\ngemini-3.1-pro - Gemini 3.1 Pro\ngrok-4.7-high - Grok 4.7 High\nmuse-spark-1.3 - Muse Spark 1.3\nkimi-k3 - Kimi K3\nglm-5.2 - GLM 5.2\n" + strings.Repeat("x", 120) + " - " + strings.Repeat("Very long model name ", 8) + "\n")
+	st.SetSetting("limits:claude", `{"agent":"claude","windows":[{"window":"five_hour","utilization":0.62,"resets_at":"`+time.Now().Add(3*time.Hour).Format(time.RFC3339)+`"},{"window":"seven_day","utilization":0.91,"resets_at":"`+time.Now().Add(80*time.Hour).Format(time.RFC3339)+`"}],"captured":"`+time.Now().Format(time.RFC3339)+`"}`)
+
+	wt, branch, err := workspace.Create(t.TempDir(), repo, "dfx001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(wt, "main.go"), []byte("package main\n\nfunc main() {\n\tprintln(\""+strings.Repeat("very long line ", 20)+"\")\n}\n"), 0o644)
+	os.MkdirAll(filepath.Join(wt, strings.Repeat("deep/", 8)), 0o755)
+	os.WriteFile(filepath.Join(wt, strings.Repeat("deep/", 8)+"x.md"), []byte("# deep\n"), 0o644)
+	t.Setenv("GIT_AUTHOR_NAME", "t")
+	t.Setenv("GIT_AUTHOR_EMAIL", "t@t")
+	t.Setenv("GIT_COMMITTER_NAME", "t")
+	t.Setenv("GIT_COMMITTER_EMAIL", "t@t")
+	if _, err := workspace.CommitAll(wt, "worker change"); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(wt, "untracked.txt"), []byte("x"), 0o644)
+	st.Save(store.Session{ID: "dfx001", Title: "diff session " + strings.Repeat("title ", 10), Task: "t", Agent: "cursor", Status: store.StatusDone,
+		Repo: repo, Dir: wt, Branch: branch, Base: "main", Worktree: true, CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	os.WriteFile(filepath.Join(notes, "Links.md"), []byte("---\ntags: [a, b]\n---\n# Links\n\nSee [[Architecture]] and [[Missing|alias]].\n\n```go\nfunc x() {}\n```\n"+strings.Repeat("long paragraph text ", 60)), 0o644)
+	m.mgr.Refresh()
 	return m
 }
 
@@ -149,9 +174,59 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.err = strings.Repeat("err ", 40)
 		},
 		"board-project": func(m *Model) { p := m.projects[0]; m.useProject(&p); m.scr = scrBoard },
+		"board-empty":   func(m *Model) { p := m.projects[0]; m.useProject(&p); m.scr = scrBoard; m.project.ID = "nothing-here" },
+		"notes": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openNotesBrowser()
+			m.followLink("Links")
+		},
+		"notes-links": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openNotesBrowser()
+			m.followLink("Links")
+			m.notes.linkPick = true
+		},
+		"diff":     func(m *Model) { m.openDiff("dfx001", scrBoard); m.diff.focus = 1 },
+		"diff-ask": func(m *Model) { m.openDiff("dfx001", scrBoard); m.startAsk(false) },
+		"models":   func(m *Model) { m.openModelPicker(scrBoard, m.setDefaultModel); m.picker.sel = 9 },
+		"models-filter": func(m *Model) {
+			m.openModelPicker(scrBoard, m.setDefaultModel)
+			m.picker.filter.SetValue("zzz")
+			m.applyModelFilter()
+			m.catalogErr = strings.Repeat("boom ", 30)
+		},
+		"missions-plan-gate": func(m *Model) { m.openMissions("mplan") },
+		"missions-tree-sel":  func(m *Model) { m.openMissions("mplan"); m.missions.nodeSel = 6 },
+		"missions-blocked":   func(m *Model) { m.openMissions("mblock") },
+		"missions-empty":     func(m *Model) { p := m.projects[0]; m.useProject(&p); m.project.ID = "none"; m.openMissions("") },
+		"missions-new": func(m *Model) {
+			m.openMissions("")
+			m.handleKey(keyMsg("n"))
+			m.ta.SetValue(strings.Repeat("goal text ", 40))
+		},
+		"missions-revise": func(m *Model) {
+			m.openMissions("mplan")
+			m.handleKey(keyMsg("e"))
+			m.missions.input.SetValue(strings.Repeat("change ", 50))
+		},
+		"missions-roles": func(m *Model) {
+			m.mgr.SetRole(store.RoleReviewer, &orch.RoleConfig{Agent: "cursor", Model: "gpt-5.3-codex-high"})
+			m.openMissions("")
+			m.handleKey(keyMsg("R"))
+		},
+		"missions-artifact": func(m *Model) { m.openMissions("mplan"); m.handleKey(keyMsg("a")) },
+		"todo-form-model": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openTodos()
+			m.openTodoForm(nil)
+			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
+		},
 	}
-	if len(screens) != 18 {
-		t.Fatalf("expected 18 screens under test, got %d", len(screens))
+	if len(screens) != 34 {
+		t.Fatalf("expected 34 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -180,9 +255,12 @@ func TestLayoutFitsTerminal(t *testing.T) {
 func gitRepoForTest(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command("git", "init", "-q", "-b", "main", dir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, out)
+	for _, args := range [][]string{{"init", "-q", "-b", "main", dir}, {"-C", dir, "commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
 	}
 	return dir
 }
@@ -204,5 +282,254 @@ func TestTodoSelectionFollowsCard(t *testing.T) {
 	m.reloadTodos()
 	if sel, ok := m.selectedTodo(); !ok || sel.ID != "t20" || m.todoCol != 3 {
 		t.Fatalf("selection should follow t20 into REVIEW, got %+v col=%d", sel, m.todoCol)
+	}
+}
+
+func TestNotesAndDiffContent(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
+	p := m.projects[0]
+	m.useProject(&p)
+	m.openNotesBrowser()
+	m.followLink("Links")
+	if f, _ := m.currentNote(); filepath.Base(f.Rel) != "Links" {
+		t.Fatalf("followLink opened %q", f.Rel)
+	}
+	if !reflect.DeepEqual(m.notes.links, []string{"Architecture", "Missing"}) || !reflect.DeepEqual(m.notes.tags, []string{"a", "b"}) {
+		t.Fatalf("links=%v tags=%v", m.notes.links, m.notes.tags)
+	}
+	m.followLink("Architecture")
+	if f, _ := m.currentNote(); filepath.Base(f.Rel) != "Architecture" {
+		t.Fatalf("wikilink not followed: %q", f.Rel)
+	}
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "Architecture") {
+		t.Fatal("preview missing")
+	}
+
+	m.openDiff("dfx001", scrBoard)
+	if len(m.diff.res.Files) != 2 || len(m.diff.res.Commits) != 1 || len(m.diff.res.Untracked) != 1 || m.diff.err != "" {
+		t.Fatalf("diff = %+v err=%s", m.diff.res, m.diff.err)
+	}
+	for i, f := range m.diff.res.Files {
+		if f.Path == "main.go" {
+			m.diff.fileSel = i
+		}
+	}
+	out := ansi.Strip(m.View())
+	for _, want := range []string{"worker change", "main.go", "+package main", "1 untracked"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff view missing %q", want)
+		}
+	}
+}
+
+func TestSpinStarCycles(t *testing.T) {
+	seen := map[string]bool{}
+	for f := 0; f < len(spinFrames)*spinEvery; f++ {
+		seen[spinStar(f, false)] = true
+		if w := ansi.StringWidth(spinStar(f, true)); w != 1 {
+			t.Fatalf("frame %d is %d cells wide", f, w)
+		}
+	}
+	if len(seen) != 3 || spinStar(0, false) != "✦" || spinStar(2*spinEvery, false) != "✕" {
+		t.Fatalf("frames = %v", seen)
+	}
+	if spinStar(spinEvery, false) != spinStar(3*spinEvery, true) {
+		t.Fatal("right star should run the sequence backwards")
+	}
+}
+
+func TestEmblem(t *testing.T) {
+	built := emblem(3 * time.Second)
+	if len(built) != emblemH {
+		t.Fatalf("rows = %d", len(built))
+	}
+	for i, r := range built {
+		if w := ansi.StringWidth(r); w != emblemW {
+			t.Fatalf("row %d is %d wide, want %d", i, w, emblemW)
+		}
+	}
+	plain := ansi.Strip(strings.Join(built, "\n"))
+	if !strings.Contains(plain, "┏━╸ ┏━╸ ┏━┓ ┏━┓ ┏━┓ ╻ ╻") || !strings.Contains(plain, "─") {
+		t.Fatalf("emblem word or orbit missing:\n%s", plain)
+	}
+	if early := ansi.Strip(strings.Join(emblem(-time.Second), "")); strings.TrimSpace(early) != "" {
+		t.Fatalf("before the build everything should be blank: %q", early)
+	}
+	stars := 0
+	for _, ms := range []int{1500, 2500, 3500, 4500, 5500} {
+		p := ansi.Strip(strings.Join(emblem(time.Duration(ms)*time.Millisecond), ""))
+		if strings.ContainsAny(p, "✦✶✕") {
+			stars++
+		}
+	}
+	if stars < 3 {
+		t.Fatalf("the star should be visible most of the lap, seen in %d/5 frames", stars)
+	}
+
+	m := testModel(t)
+	m.logoStyle = LogoOrbit
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
+	m.scr = scrBoard
+	m.emblemStart = time.Now().Add(-5 * time.Second)
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "┏━╸ ┏━╸") || !strings.Contains(out, "ORCHESTRATE THE CHOIR") {
+		t.Fatal("board should show the corner emblem on a large terminal")
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if out := ansi.Strip(m.View()); strings.Contains(out, "┏━╸ ┏━╸") || !strings.Contains(out, "SERAPH") {
+		t.Fatal("small terminals should use the compact header")
+	}
+}
+
+func TestLineMark(t *testing.T) {
+	built := lineMark(3 * time.Second)
+	if len(built) != lineH {
+		t.Fatalf("rows = %d", len(built))
+	}
+	for i, r := range built {
+		if w := ansi.StringWidth(r); w != lineW {
+			t.Fatalf("row %d is %d wide, want %d", i, w, lineW)
+		}
+	}
+	plain := ansi.Strip(strings.Join(built, "\n"))
+	if !strings.Contains(plain, "╭──╴ ╭──╴ ╭──╮ ╭──╮ ╭──╮ ╷  ╷") || !strings.Contains(plain, "╶") {
+		t.Fatalf("line mark:\n%s", plain)
+	}
+	if strings.TrimSpace(ansi.Strip(strings.Join(lineMark(-time.Second), ""))) != "" {
+		t.Fatal("before the build everything should be blank")
+	}
+	if logoStyleFor("") != LogoOrbit || logoStyleFor(LogoLine) != LogoLine {
+		t.Fatal("default must be orbit, setting line selects the alternative")
+	}
+	t.Setenv("SERAPH_LOGO", LogoLine)
+	if logoStyleFor("") != LogoLine {
+		t.Fatal("SERAPH_LOGO must override the setting")
+	}
+
+	m := testModel(t)
+	m.logoStyle = LogoLine
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
+	m.scr = scrBoard
+	m.emblemStart = time.Now().Add(-5 * time.Second)
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "╭──╴ ╭──╴ ╭──╮") || !strings.Contains(out, "ORCHESTRATE THE CHOIR") || !strings.Contains(out, "spent") {
+		t.Fatal("board should show the line logo with the poster info")
+	}
+}
+
+func TestModelPickerFlow(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h = 120, 40
+	m.openModelPicker(scrBoard, m.setDefaultModel)
+	for _, r := range "grok" {
+		m.modelsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if len(m.picker.view) != 1 {
+		t.Fatalf("filter grok -> %d rows", len(m.picker.view))
+	}
+	m.modelsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.scr != scrBoard || m.opt.Agent != "cursor" || m.opt.Model != "grok-4.7-high" {
+		t.Fatalf("picked %s/%s scr=%v", m.opt.Agent, m.opt.Model, m.scr)
+	}
+	if m.mgr.Store().Setting(DefaultModelSetting) != "grok-4.7-high" || m.mgr.Store().Setting(DefaultAgentSetting) != "cursor" {
+		t.Fatal("default model not persisted")
+	}
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "Grok 4.7 High") || !strings.Contains(v, "xAI") {
+		t.Fatalf("board header lacks model/provider:\n%s", v)
+	}
+	m.openModelPicker(scrBoard, m.setDefaultModel)
+	v = ansi.Strip(m.View())
+	for _, want := range []string{"Anthropic", "OpenAI", "Google", "Meta", "Moonshot AI", "5h", "62%", "7d", "91%"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("picker lacks %q", want)
+		}
+	}
+}
+
+func seedMissions(t *testing.T, st *store.Store, notes, repo string) {
+	t.Helper()
+	art := filepath.Join(notes, "Seraph Missions", "m")
+	os.MkdirAll(art, 0o755)
+	spec := filepath.Join(art, "spec.md")
+	os.WriteFile(spec, []byte("# Spec\n\n## Acceptance criteria\n1. AC1 "+strings.Repeat("long criterion ", 30)+"\n"), 0o644)
+	plan := filepath.Join(art, "plan.md")
+	os.WriteFile(plan, []byte("# Plan\n"+strings.Repeat("- step\n", 80)), 0o644)
+	now := time.Now()
+	st.SaveMission(store.Mission{ID: "mplan", ProjectID: "", Title: "Payments with BLIK and a long mission title that keeps going", Goal: "g", Repo: repo, Base: "main",
+		Branch: "seraph/m-mplan", Dir: repo, Artifacts: art, Phase: store.PhasePlan, State: store.MissionWaiting, Gate: store.PhasePlan, CreatedAt: now})
+	st.SaveMission(store.Mission{ID: "mblock", Title: "Blocked one", Goal: "g", Repo: repo, Base: "main", Branch: "seraph/m-mblock", Dir: repo, Artifacts: art,
+		Phase: store.PhaseBuild, State: store.MissionBlocked, Error: "merge conflict in " + strings.Repeat("internal/very/long/path.go, ", 6), CreatedAt: now.Add(-time.Hour)})
+	st.SaveMission(store.Mission{ID: "mdone", Title: "Done one", Goal: "g", Repo: repo, Branch: "seraph/m-mdone", Artifacts: art, Phase: store.PhaseDone, State: store.MissionDone, CreatedAt: now.Add(-2 * time.Hour)})
+	nodes := []store.Node{
+		{ID: "n1", MissionID: "mplan", Role: store.RolePO, Title: "Specification", Status: store.NodeDone, Artifact: spec, SessionID: "s00000"},
+		{ID: "n2", MissionID: "mplan", Role: store.RoleAnalyst, Title: strings.Repeat("How does the checkout talk to the payment provider? ", 3), Status: store.NodeDone, SessionID: "s00001"},
+		{ID: "n3", MissionID: "mplan", Role: store.RoleAnalyst, Title: "Where are webhooks verified?", Status: store.NodeWorking, SessionID: "s00003"},
+		{ID: "n4", MissionID: "mplan", Role: store.RoleLead, Title: "Plan", Status: store.NodeDone, Artifact: plan, Note: strings.Repeat("\"api\" and \"ui\" both own src/** / src/api/** and run in parallel\n", 3)},
+		{ID: "n5", MissionID: "mplan", Role: store.RoleDev, Title: "Backend endpoint for BLIK codes", Files: []string{"internal/api/**", "internal/payments/blik/**"}, Status: store.NodeMerged, Round: 1},
+		{ID: "n6", MissionID: "mplan", ParentID: "n5", Role: store.RoleReviewer, Title: "Review of Backend endpoint", Status: store.NodeDone, Verdict: "CHANGES"},
+		{ID: "n7", MissionID: "mplan", ParentID: "n5", Role: store.RoleReviewer, Title: "Review of Backend endpoint", Status: store.NodeDone, Verdict: "APPROVE", Round: 1},
+		{ID: "n8", MissionID: "mplan", Role: store.RoleDev, Title: "UI", Files: []string{"web/**"}, Status: store.NodeFailed, Note: "boom"},
+		{ID: "n9", MissionID: "mplan", Role: store.RoleTester, Title: "Tests", Status: store.NodeDone, Verdict: "FAIL"},
+		{ID: "n10", MissionID: "mplan", ParentID: "n9", Role: store.RoleDev, Title: "Fix failing tests", Status: store.NodePending},
+		{ID: "n11", MissionID: "mplan", Role: store.RoleAcceptance, Title: "Acceptance", Status: store.NodePending},
+	}
+	for i, n := range nodes {
+		n.Position = i + 1
+		if err := st.SaveNode(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.SaveNode(store.Node{ID: "b1", MissionID: "mblock", Role: store.RoleDev, Title: "conflicting", Status: store.NodeFailed, Note: "merge conflict", Position: 1})
+}
+
+func TestMissionsScreenFlow(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h = 140, 44
+	m.scr = scrBoard
+	m.handleKey(keyMsg("M"))
+	if m.scr != scrMissions || len(m.missions.list) != 3 {
+		t.Fatalf("missions screen: scr=%v list=%d", m.scr, len(m.missions.list))
+	}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"Orchestrator", "Product Owner", "Analyst", "Tech Lead", "Developer", "Reviewer", "Fixer", "Tester", "Acceptance", "PLAN READY FOR YOUR DECISION", "both own", "approve", "changes", "fail"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missions view lacks %q", want)
+		}
+	}
+	m.handleKey(keyMsg("tab"))
+	m.handleKey(keyMsg("a"))
+	if m.missions.mode != mmArtifact || !strings.Contains(ansi.Strip(m.View()), "Spec") {
+		t.Fatal("a on the PO node must open spec.md")
+	}
+	m.handleKey(keyMsg("esc"))
+	m.handleKey(keyMsg("down"))
+	m.handleKey(keyMsg("enter"))
+	if m.scr != scrDetail || m.openID != "s00001" {
+		t.Fatalf("enter on a node opens its worker: scr=%v id=%s", m.scr, m.openID)
+	}
+	m.handleKey(keyMsg("esc"))
+	if m.scr != scrMissions {
+		t.Fatal("esc from a worker returns to missions")
+	}
+	m.handleKey(keyMsg("R"))
+	m.handleKey(keyMsg("enter"))
+	if m.scr != scrModels {
+		t.Fatal("roles: enter opens the model picker")
+	}
+	m.pickModel(agent.Model{Agent: "cursor", ID: "gemini-3.1-pro", Name: "Gemini 3.1 Pro", Provider: "Google"})
+	if c := m.mgr.Role(store.RolePO); c.Agent != "cursor" || c.Model != "gemini-3.1-pro" || c.Approval != agent.ApprovalReadOnly {
+		t.Fatalf("role = %+v", c)
+	}
+	if m.scr != scrMissions || m.missions.mode != mmRoles {
+		t.Fatal("picker must return to the roles list")
+	}
+	m.handleKey(keyMsg("esc"))
+	m.handleKey(keyMsg("esc"))
+	if m.scr != scrBoard {
+		t.Fatal("esc returns to the board")
 	}
 }

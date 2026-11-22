@@ -45,7 +45,9 @@ Usage:
   seraph redis up|down|status    optional Redis for live sync and caching
   seraph db                      show the SQLite database
   seraph doctor                  check that agents are installed
-  seraph logo [cols] [rows]      print the emblem
+  seraph models [filter]         models per agent with provider + usage limits
+  seraph logo [cols] [rows]      print the angel emblem
+  seraph logo style [line|orbit] choose the board/splash logo
 
 Flags (seraph and seraph run):
   -a, -agent string   claude | cursor (default "claude", env SERAPH_AGENT)
@@ -61,6 +63,7 @@ State lives in %s (override with SERAPH_HOME).
 type common struct {
 	agent, model               string
 	yolo, noWorktree, noSplash bool
+	agentSet                   bool
 }
 
 func parseFlags(name string, args []string) (*common, []string, error) {
@@ -84,6 +87,12 @@ func parseFlags(name string, args []string) (*common, []string, error) {
 	if _, err := agent.Get(c.agent); err != nil {
 		return nil, nil, err
 	}
+	c.agentSet = os.Getenv("SERAPH_AGENT") != "" || c.model != ""
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "agent" || f.Name == "a" {
+			c.agentSet = true
+		}
+	})
 	return c, fs.Args(), nil
 }
 
@@ -115,6 +124,8 @@ func run(args []string) error {
 			return cmdDB()
 		case "doctor":
 			return cmdDoctor()
+		case "models":
+			return cmdModels(args[1:])
 		case "logo":
 			return cmdLogo(args[1:])
 		case "version", "--version", "-v":
@@ -160,7 +171,7 @@ func cmdTUI(c *common) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = tui.Run(mgr, tui.Options{
-		Repo: repo, Dir: dir, Agent: c.agent, Model: c.model,
+		Repo: repo, Dir: dir, Agent: c.agent, Model: c.model, AgentSet: c.agentSet,
 		Approval: c.approval(), SkipSplash: c.noSplash, Version: version,
 		Storage: stg.status, Updates: stg.bus.Subscribe(ctx),
 	})
@@ -353,6 +364,29 @@ func cmdDoctor() error {
 }
 
 func cmdLogo(args []string) error {
+	if len(args) > 0 && args[0] == "style" {
+		st, err := store.Open()
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		if len(args) == 1 {
+			cur := st.Setting(tui.LogoStyleSetting)
+			if cur == "" {
+				cur = tui.LogoOrbit
+			}
+			fmt.Println("logo style: " + cur + "  (line | orbit)")
+			return nil
+		}
+		if args[1] != tui.LogoLine && args[1] != tui.LogoOrbit {
+			return errors.New("usage: seraph logo style [line|orbit]")
+		}
+		if err := st.SetSetting(tui.LogoStyleSetting, args[1]); err != nil {
+			return err
+		}
+		fmt.Println(t.FG(t.Gold).Render("✦ ") + "logo style set to " + args[1])
+		return nil
+	}
 	cols, rows := 64, 32
 	if len(args) > 0 {
 		n, err := strconv.Atoi(args[0])

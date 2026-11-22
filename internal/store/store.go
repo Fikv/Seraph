@@ -49,6 +49,8 @@ type Session struct {
 	Error          string    `json:"error,omitempty"`
 	ProjectID      string    `json:"project_id,omitempty"`
 	TodoID         string    `json:"todo_id,omitempty"`
+	MissionID      string    `json:"mission_id,omitempty"`
+	NodeID         string    `json:"node_id,omitempty"`
 	OwnerPID       int       `json:"-"`
 	HeartbeatAt    time.Time `json:"-"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -152,6 +154,48 @@ var migrations = []string{
 	CREATE INDEX todos_project ON todos(project_id, status, priority DESC, created_at);
 	ALTER TABLE sessions ADD COLUMN project_id TEXT NOT NULL DEFAULT '';
 	ALTER TABLE sessions ADD COLUMN todo_id TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE todos ADD COLUMN model TEXT NOT NULL DEFAULT '';`,
+	`CREATE TABLE missions (
+		id TEXT PRIMARY KEY,
+		project_id TEXT NOT NULL DEFAULT '',
+		todo_id TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL,
+		goal TEXT NOT NULL,
+		repo TEXT NOT NULL,
+		base TEXT NOT NULL DEFAULT '',
+		branch TEXT NOT NULL DEFAULT '',
+		dir TEXT NOT NULL DEFAULT '',
+		artifacts TEXT NOT NULL DEFAULT '',
+		phase TEXT NOT NULL,
+		state TEXT NOT NULL,
+		gate TEXT NOT NULL DEFAULT '',
+		error TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE INDEX missions_project ON missions(project_id, created_at DESC);
+	CREATE TABLE mission_nodes (
+		id TEXT PRIMARY KEY,
+		mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+		parent_id TEXT NOT NULL DEFAULT '',
+		role TEXT NOT NULL,
+		title TEXT NOT NULL,
+		task TEXT NOT NULL DEFAULT '',
+		files TEXT NOT NULL DEFAULT '[]',
+		deps TEXT NOT NULL DEFAULT '[]',
+		status TEXT NOT NULL,
+		session_id TEXT NOT NULL DEFAULT '',
+		artifact TEXT NOT NULL DEFAULT '',
+		verdict TEXT NOT NULL DEFAULT '',
+		round INTEGER NOT NULL DEFAULT 0,
+		position INTEGER NOT NULL DEFAULT 0,
+		note TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE INDEX mission_nodes_mission ON mission_nodes(mission_id, position);
+	ALTER TABLE sessions ADD COLUMN mission_id TEXT NOT NULL DEFAULT '';
+	ALTER TABLE sessions ADD COLUMN node_id TEXT NOT NULL DEFAULT '';`,
 }
 
 func Open() (*Store, error) {
@@ -228,11 +272,12 @@ func b2i(b bool) int {
 }
 
 const sessionCols = `id, title, task, agent, model, approval, repo, dir, branch, base, worktree, status,
-	agent_session_id, cost, turns, last_line, error, owner_pid, heartbeat_at, created_at, updated_at, project_id, todo_id`
+	agent_session_id, cost, turns, last_line, error, owner_pid, heartbeat_at, created_at, updated_at, project_id, todo_id,
+	mission_id, node_id`
 
 func (s *Store) Save(sess Session) error {
 	_, err := s.db.Exec(`INSERT INTO sessions (`+sessionCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title=excluded.title, task=excluded.task, agent=excluded.agent, model=excluded.model,
 			approval=excluded.approval, repo=excluded.repo, dir=excluded.dir, branch=excluded.branch,
@@ -240,11 +285,12 @@ func (s *Store) Save(sess Session) error {
 			agent_session_id=excluded.agent_session_id, cost=excluded.cost, turns=excluded.turns,
 			last_line=excluded.last_line, error=excluded.error, owner_pid=excluded.owner_pid,
 			heartbeat_at=excluded.heartbeat_at, updated_at=excluded.updated_at,
-			project_id=excluded.project_id, todo_id=excluded.todo_id`,
+			project_id=excluded.project_id, todo_id=excluded.todo_id,
+			mission_id=excluded.mission_id, node_id=excluded.node_id`,
 		sess.ID, sess.Title, sess.Task, sess.Agent, sess.Model, sess.Approval, sess.Repo, sess.Dir,
 		sess.Branch, sess.Base, b2i(sess.Worktree), string(sess.Status), sess.AgentSessionID, sess.Cost,
 		sess.Turns, sess.LastLine, sess.Error, sess.OwnerPID, ms(sess.HeartbeatAt), ms(sess.CreatedAt), ms(sess.UpdatedAt),
-		sess.ProjectID, sess.TodoID)
+		sess.ProjectID, sess.TodoID, sess.MissionID, sess.NodeID)
 	return err
 }
 
@@ -257,7 +303,8 @@ func scanSession(r scanner) (Session, error) {
 	var hb, created, updated int64
 	err := r.Scan(&sess.ID, &sess.Title, &sess.Task, &sess.Agent, &sess.Model, &sess.Approval, &sess.Repo,
 		&sess.Dir, &sess.Branch, &sess.Base, &worktree, &status, &sess.AgentSessionID, &sess.Cost, &sess.Turns,
-		&sess.LastLine, &sess.Error, &sess.OwnerPID, &hb, &created, &updated, &sess.ProjectID, &sess.TodoID)
+		&sess.LastLine, &sess.Error, &sess.OwnerPID, &hb, &created, &updated, &sess.ProjectID, &sess.TodoID,
+		&sess.MissionID, &sess.NodeID)
 	sess.Status = Status(status)
 	sess.Worktree = worktree != 0
 	sess.HeartbeatAt, sess.CreatedAt, sess.UpdatedAt = fromMS(hb), fromMS(created), fromMS(updated)

@@ -41,6 +41,7 @@ type Todo struct {
 	Priority  int
 	Repo      string
 	Agent     string
+	Model     string
 	SessionID string
 	Note      string
 	CreatedAt time.Time
@@ -159,6 +160,9 @@ func (s *Store) DeleteProject(id string) error {
 	if _, err := tx.Exec(`UPDATE sessions SET project_id = '', todo_id = '' WHERE project_id = ?`, id); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`UPDATE missions SET project_id = '', todo_id = '' WHERE project_id = ?`, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM projects WHERE id = ?`, id); err != nil {
 		return err
 	}
@@ -170,13 +174,13 @@ func (s *Store) DeleteProject(id string) error {
 	return tx.Commit()
 }
 
-const todoCols = `id, project_id, title, body, status, priority, repo, agent, session_id, note, created_at, updated_at`
+const todoCols = `id, project_id, title, body, status, priority, repo, agent, session_id, note, created_at, updated_at, model`
 
 func scanTodo(r scanner) (Todo, error) {
 	var t Todo
 	var status string
 	var c, u int64
-	err := r.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Body, &status, &t.Priority, &t.Repo, &t.Agent, &t.SessionID, &t.Note, &c, &u)
+	err := r.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Body, &status, &t.Priority, &t.Repo, &t.Agent, &t.SessionID, &t.Note, &c, &u, &t.Model)
 	t.Status, t.CreatedAt, t.UpdatedAt = TodoStatus(status), fromMS(c), fromMS(u)
 	return t, err
 }
@@ -193,11 +197,11 @@ func (s *Store) SaveTodo(t Todo) error {
 		t.CreatedAt = now
 	}
 	t.UpdatedAt = now
-	_, err := s.db.Exec(`INSERT INTO todos (`+todoCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO todos (`+todoCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET title=excluded.title, body=excluded.body, status=excluded.status,
 			priority=excluded.priority, repo=excluded.repo, agent=excluded.agent, session_id=excluded.session_id,
-			note=excluded.note, updated_at=excluded.updated_at`,
-		t.ID, t.ProjectID, t.Title, t.Body, string(t.Status), t.Priority, t.Repo, t.Agent, t.SessionID, t.Note, ms(t.CreatedAt), ms(t.UpdatedAt))
+			note=excluded.note, updated_at=excluded.updated_at, model=excluded.model`,
+		t.ID, t.ProjectID, t.Title, t.Body, string(t.Status), t.Priority, t.Repo, t.Agent, t.SessionID, t.Note, ms(t.CreatedAt), ms(t.UpdatedAt), t.Model)
 	return err
 }
 

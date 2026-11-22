@@ -25,6 +25,8 @@ go build -o ~/.local/bin/seraph ./cmd/seraph
 ```sh
 seraph                       # board (TUI)
 seraph -a cursor --yolo      # default agent cursor, agents may run any command
+seraph -a cursor -m grok-4.7-high     # pick a model for this run
+seraph models [filter]       # every model per agent, its provider and usage limits
 seraph run "add a /health endpoint"   # one headless worker, streamed
 seraph ls                    # list sessions
 seraph rm <id>               # remove worktree + record (branch kept)
@@ -34,22 +36,71 @@ seraph rm <id>               # remove worktree + record (branch kept)
 
 | key | action |
 |-----|--------|
-| `n` | summon a worker (`tab` switches agent, `ctrl+y` mode, `alt+⏎` newline) |
+| `n` | summon a worker (`tab` picks the model, `ctrl+y` mode, `alt+⏎` newline) |
 | `p` | divine a plan: the planner agent splits a goal into parallel tasks |
 | `⏎` | open a session: live transcript, send follow-ups |
 | `r` | resume a stopped/failed worker |
 | `x` / `d` | stop / release a worker |
-| `a` / `y` | default agent / approval mode |
+| `a` / `y` | model picker / approval mode |
 | `g` | projects: switch, create, edit, open notes in Obsidian |
 | `t` | the project todo board |
+| `M` | missions: a team of agents per goal |
 | `m` | menu: keycap tiles for every action |
 | `s` | back to the start screen |
 | `c` | MCP servers: browse, install, test, configure |
+| `o` | notes: browse and read the project markdown |
+| `v` | diff of the selected worker; `?` asks the agent about a hunk |
 | `←→ ↑↓` | move between lanes and cards |
 
 Mouse works everywhere: click cards (click again or double-click to open), lane headers, key chips and menu tiles; the wheel scrolls.
 
 Lanes: **⟡ in flight** (working), **☩ needs you** (failed or stopped), **✦ ascended** (done).
+
+## Models and limits
+
+`a` (or `tab` while composing) opens the model picker. Claude Code models are listed
+first, then everything `cursor-agent --list-models` offers for your account, each with
+the company that makes it (Anthropic, OpenAI, Google, xAI, Meta, DeepSeek, Moonshot AI,
+Z.ai, Cursor). Type to filter by name, id or provider. The choice is remembered and
+picking a Cursor model switches the worker to Cursor. Todos can pin their own model.
+
+Usage bars come from the `rate_limit_event` Claude Code emits during a run: the
+5 hour and 7 day windows, coloured mint, gold above 60% and rose above 85%, with time
+to reset. They show on the board header, the start screen and the picker, and refresh
+whenever a Claude worker runs. `cursor-agent` does not expose usage, so Seraph only
+shows your Cursor plan.
+
+## Missions: a team in a tree
+
+`M` opens missions. A mission is a goal worked on by a team, with Seraph as the
+orchestrator:
+
+```
+✧ Orchestrator (Seraph)
+├─ ♔ Product Owner   spec.md: goal, user stories, acceptance criteria, out of scope   ⏸ you approve
+├─ ◎ Analysts ×0-4   answer the PO's questions about the existing code (in parallel)
+├─ ♖ Tech Lead       plan.md: 1-5 tasks, each owning a disjoint set of paths          ⏸ you approve
+├─ ⌘ Developers      one git worktree each, branched from the mission branch
+│  └─ ◉ Reviewer     fresh context: task + spec + diff, up to 2 rounds, then merge
+├─ ⚗ Tester          writes and runs tests against the criteria; failures go to a fixer
+└─ ♔ Acceptance      the PO checks every criterion against the full diff              ⏸ you approve
+```
+
+- Only developers and the tester write. Everyone else is read-only. Developers own
+  disjoint paths and are merged one by one into `seraph/m-<id>`; a conflict stops the
+  mission until you retry the task (`r`), which rebuilds it on top of the merged work.
+- Every role's output is a markdown artifact in the project's notes folder
+  (`Seraph Missions/…`), so the whole trail is readable in Obsidian. `a` shows it.
+- At a gate: `y` approve, `e` request changes (sent back to the PO, the tech lead or the
+  developers), `x x` cancel. `⏎` opens any role's worker, `v` its diff.
+- `R` assigns a model to each role, for example Opus for the PO, Haiku for analysts and a
+  different provider for the reviewer. Developers and the tester run in **test** mode:
+  edits plus test and build commands only (`go test`, `npm test`, `pytest`, …).
+- Todos on the todo board start missions. `n` on the board still summons a single
+  worker for small things.
+- When the mission is accepted, merge its branch yourself: `git merge seraph/m-<id>`.
+
+A mission runs many agent sessions, so it costs a multiple of a single worker.
 
 ## Projects and the todo board
 
@@ -64,7 +115,7 @@ seraph project use DIKO        # or press g in the TUI
 - The board shows only the current project's workers (`◈` in the header, `g` to switch, `*` for all).
 - Workers start in the project's repo and get the notes folder as an extra directory
   (`--add-dir`), with an instruction to read the relevant notes before they start.
-- `o` opens the project's notes in Obsidian.
+- On the projects screen (`g`), `o` opens the notes folder in Obsidian; `o` on the board opens the notes browser.
 
 Press `t` for the project's **todo board**: `TODO → QUEUED → DOING → REVIEW → DONE`.
 
@@ -80,6 +131,26 @@ Press `t` for the project's **todo board**: `TODO → QUEUED → DOING → REVIE
 seraph todo add -prio 2 -queue "Add a /health endpoint"
 seraph todo list
 ```
+
+## Notes and diffs
+
+**Notes (`o`)**: browse the markdown of the current project: its Obsidian notes folder and the
+`.md` files in its repositories (README, docs). The list filters as you type (`/`); the preview
+renders markdown in Seraph's colours, hides frontmatter (tags show in the header), turns
+`[[wikilinks]]` into bold labels and lets you follow them (`l`). `o` opens the note in Obsidian.
+Folders exported by graphify are skipped.
+
+Agent replies in the session transcript are rendered as markdown too.
+
+**Diff (`v` on the board or todo board, `ctrl+g` in a session)**: everything a worker changed
+since its branch left the base: changed files with `+/-` counts, coloured hunks with line numbers,
+the worker's commits and untracked files. If the worktree was released, the diff comes from the
+branch.
+
+**Ask the agent about a change**: `?` on a hunk (or `a` for the whole file) sends your question,
+with the hunk attached, to the worker's own conversation. It runs **read-only** (Claude: read
+tools only; Cursor: `--mode ask`) and **nothing is committed**; the session keeps its status. The
+answer streams into the transcript and `esc` takes you back to the diff.
 
 ## MCP servers
 
@@ -104,6 +175,13 @@ seraph mcp add io.github.domdomegg/filesystem-mcp
 seraph mcp add <name> -e API_KEY=... -no-cursor
 seraph mcp list | test <name> | rm <name>
 ```
+
+## Logo
+
+The board and the start screen show the SERAPH mark: slanted blade letters inside an orbit ring,
+built in with a pixel glitch, with a spinning star circling the ring. `seraph logo style line`
+switches to the alternative mark (thin rounded letters with a comet running along a line);
+`seraph logo style orbit` switches back. `SERAPH_LOGO=orbit|line` overrides the setting for one run.
 
 ## Storage
 
