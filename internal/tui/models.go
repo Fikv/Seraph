@@ -86,7 +86,16 @@ func (m *Model) loadCatalog() tea.Cmd {
 }
 
 func (m *Model) modelName(agentName, id string) string {
-	return agent.ModelName(agentName, id, m.catalog())
+	key := agentName + "\x00" + id
+	if v, ok := m.nameMemo[key]; ok {
+		return v
+	}
+	v := agent.ModelName(agentName, id, m.catalog())
+	if m.nameMemo == nil {
+		m.nameMemo = map[string]string{}
+	}
+	m.nameMemo[key] = v
+	return v
 }
 
 func (m *Model) modelLabel() string {
@@ -300,7 +309,7 @@ func untilText(ts time.Time) string {
 }
 
 func (m *Model) claudeLimits(cells int, withReset bool) string {
-	l, ok := m.mgr.Limits("claude")
+	l, ok := m.stats.limits, m.stats.hasLimits
 	if !ok || len(l.Windows) == 0 {
 		return sFaint.Render("limits: no data yet (updates when a Claude worker runs)")
 	}

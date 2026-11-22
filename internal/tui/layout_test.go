@@ -123,6 +123,7 @@ func testModel(t *testing.T) *Model {
 		Repo: repo, Dir: wt, Branch: branch, Base: "main", Worktree: true, CreatedAt: time.Now(), UpdatedAt: time.Now()})
 	os.WriteFile(filepath.Join(notes, "Links.md"), []byte("---\ntags: [a, b]\n---\n# Links\n\nSee [[Architecture]] and [[Missing|alias]].\n\n```go\nfunc x() {}\n```\n"+strings.Repeat("long paragraph text ", 60)), 0o644)
 	m.mgr.Refresh()
+	m.refreshStats()
 	return m
 }
 
@@ -531,5 +532,51 @@ func TestMissionsScreenFlow(t *testing.T) {
 	m.handleKey(keyMsg("esc"))
 	if m.scr != scrBoard {
 		t.Fatal("esc returns to the board")
+	}
+}
+
+func TestMouseGarbageFilter(t *testing.T) {
+	m := testModel(t)
+	runes := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	for _, junk := range []tea.KeyMsg{
+		runes("[<35;77;27M"), runes("<35;60;12M"), runes("[<35;60"), runes("35;60;12M"),
+		{Type: tea.KeyRunes, Runes: []rune("["), Alt: true},
+	} {
+		if !m.mouseGarbage(junk) {
+			t.Errorf("%q must be dropped", junk.String())
+		}
+	}
+	if !m.mouseGarbage(runes("M")) {
+		t.Error("a lone tail right after a fragment must be dropped")
+	}
+	m.swallowAt = time.Time{}
+	for _, ok := range []tea.KeyMsg{runes(";"), runes("5"), runes("M"), runes("a"), runes("<"), {Type: tea.KeyRunes, Runes: []rune("[<35;1;1M stays"), Paste: true}, {Type: tea.KeyEnter}} {
+		if m.mouseGarbage(ok) {
+			t.Errorf("%q is real input and must pass", ok.String())
+		}
+	}
+}
+
+func TestIdleMotionSkipsRender(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h, m.scr = 120, 40, scrBoard
+	m.ta.Focus()
+	first := m.View()
+	m.handleMouse(tea.MouseMsg{X: 200, Y: 200, Action: tea.MouseActionMotion})
+	if !m.skipRender || m.View() != first {
+		t.Fatal("motion that changes nothing must reuse the last frame")
+	}
+	if m.skipRender {
+		t.Fatal("the skip flag must reset after one frame")
+	}
+	m.scr = scrNew
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<35;77;27M")})
+	if strings.Contains(m.ta.Value(), "35;77") {
+		t.Fatalf("mouse garbage leaked into the input: %q", m.ta.Value())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.ta.Value() != "x" {
+		t.Fatalf("real typing must reach the input: %q", m.ta.Value())
 	}
 }

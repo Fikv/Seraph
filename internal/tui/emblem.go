@@ -271,7 +271,7 @@ func (m *Model) emblemHeader() string {
 		counts,
 		spent,
 	}
-	if _, ok := m.mgr.Limits("claude"); ok {
+	if m.stats.hasLimits {
 		if lim := m.claudeLimits(6, true); lipgloss.Width(lim)+lipgloss.Width(tag)+5 <= m.w-artW-8 {
 			right[0] = lim + sFaint.Render("  ·  ") + tag
 		} else if lipgloss.Width(lim) <= m.w-artW-8 {
