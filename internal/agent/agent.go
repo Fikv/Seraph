@@ -26,6 +26,7 @@ const (
 	KindResult    Kind = "result"
 	KindError     Kind = "error"
 	KindSystem    Kind = "system"
+	KindLimits    Kind = "limits"
 )
 
 type Event struct {
@@ -36,6 +37,7 @@ type Event struct {
 	Cost      float64   `json:"cost,omitempty"`
 	IsError   bool      `json:"is_error,omitempty"`
 	Delta     bool      `json:"delta,omitempty"`
+	Limits    []Limit   `json:"limits,omitempty"`
 	Time      time.Time `json:"t"`
 }
 

@@ -25,6 +25,8 @@ go build -o ~/.local/bin/seraph ./cmd/seraph
 ```sh
 seraph                       # board (TUI)
 seraph -a cursor --yolo      # default agent cursor, agents may run any command
+seraph -a cursor -m grok-4.7-high     # pick a model for this run
+seraph models [filter]       # every model per agent, its provider and usage limits
 seraph run "add a /health endpoint"   # one headless worker, streamed
 seraph ls                    # list sessions
 seraph rm <id>               # remove worktree + record (branch kept)
@@ -34,12 +36,12 @@ seraph rm <id>               # remove worktree + record (branch kept)
 
 | key | action |
 |-----|--------|
-| `n` | summon a worker (`tab` switches agent, `ctrl+y` mode, `alt+⏎` newline) |
+| `n` | summon a worker (`tab` picks the model, `ctrl+y` mode, `alt+⏎` newline) |
 | `p` | divine a plan: the planner agent splits a goal into parallel tasks |
 | `⏎` | open a session: live transcript, send follow-ups |
 | `r` | resume a stopped/failed worker |
 | `x` / `d` | stop / release a worker |
-| `a` / `y` | default agent / approval mode |
+| `a` / `y` | model picker / approval mode |
 | `g` | projects: switch, create, edit, open notes in Obsidian |
 | `t` | the project todo board |
 | `m` | menu: keycap tiles for every action |
@@ -52,6 +54,20 @@ seraph rm <id>               # remove worktree + record (branch kept)
 Mouse works everywhere: click cards (click again or double-click to open), lane headers, key chips and menu tiles; the wheel scrolls.
 
 Lanes: **⟡ in flight** (working), **☩ needs you** (failed or stopped), **✦ ascended** (done).
+
+## Models and limits
+
+`a` (or `tab` while composing) opens the model picker. Claude Code models are listed
+first, then everything `cursor-agent --list-models` offers for your account, each with
+the company that makes it (Anthropic, OpenAI, Google, xAI, Meta, DeepSeek, Moonshot AI,
+Z.ai, Cursor). Type to filter by name, id or provider. The choice is remembered and
+picking a Cursor model switches the worker to Cursor. Todos can pin their own model.
+
+Usage bars come from the `rate_limit_event` Claude Code emits during a run: the
+5 hour and 7 day windows, coloured mint, gold above 60% and rose above 85%, with time
+to reset. They show on the board header, the start screen and the picker, and refresh
+whenever a Claude worker runs. `cursor-agent` does not expose usage, so Seraph only
+shows your Cursor plan.
 
 ## Projects and the todo board
 

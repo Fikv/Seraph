@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -68,8 +69,36 @@ func assertEvents(t *testing.T, line string, got, want []Event) {
 		t.Fatalf("%s\n got %d events %+v, want %d", line, len(got), got, len(want))
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("%s\n event %d: got %+v, want %+v", line, i, got[i], want[i])
 		}
+	}
+}
+
+func TestRateLimitAndModels(t *testing.T) {
+	line := `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1795297200,"rateLimitType":"five_hour","unifiedWindows":{"seven_day":{"utilization":0.02,"resetsAt":1795597200,"status":"allowed"},"five_hour":{"utilization":0.41,"resetsAt":1795297200,"status":"allowed"}}}}`
+	evs := Claude{}.Parse([]byte(line))
+	if len(evs) != 1 || evs[0].Kind != KindLimits || len(evs[0].Limits) != 2 {
+		t.Fatalf("events = %+v", evs)
+	}
+	if evs[0].Limits[0].Window != "five_hour" || evs[0].Limits[0].Utilization != 0.41 || evs[0].Limits[1].Window != "seven_day" {
+		t.Fatalf("limits = %+v", evs[0].Limits)
+	}
+	out := "Available models\n\nauto - Auto (default)\ngpt-5.3-codex - Codex 5.3\nclaude-opus-5-5-high - Claude Opus 5.5 1M High\ngrok-4.7-low-fast - Grok 4.7  Low Fast​​\nmuse-spark-1.3 - Muse Spark 1.3\nglm-5.2 - GLM 5.2\nweird-model - Weird\n"
+	ms := ParseCursorModels(out)
+	want := map[string]string{"auto": "Cursor", "gpt-5.3-codex": "OpenAI", "claude-opus-5-5-high": "Anthropic", "grok-4.7-low-fast": "xAI", "muse-spark-1.3": "Meta", "glm-5.2": "Z.ai", "weird-model": "unknown"}
+	if len(ms) != len(want) || ms[0].ID != "auto" {
+		t.Fatalf("models = %+v", ms)
+	}
+	for _, m := range ms {
+		if want[m.ID] != m.Provider {
+			t.Errorf("%s provider = %s, want %s", m.ID, m.Provider, want[m.ID])
+		}
+		if m.ID == "grok-4.7-low-fast" && m.Name != "Grok 4.7 Low Fast" {
+			t.Errorf("name not cleaned: %q", m.Name)
+		}
+	}
+	if WindowLabel("five_hour") != "5h" || WindowLabel("seven_day_opus") != "7d opus" {
+		t.Fatal("window labels")
 	}
 }

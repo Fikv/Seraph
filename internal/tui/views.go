@@ -47,6 +47,8 @@ func (m *Model) screen() string {
 		return m.projectsView()
 	case scrNotes:
 		return m.notesView()
+	case scrModels:
+		return m.overlay(m.modelPickerView())
 	case scrDiff:
 		return m.diffView()
 	case scrTodos:
@@ -66,7 +68,7 @@ func (m *Model) header() string {
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
 		sGold.Render(fmt.Sprintf("✦ %d", len(ls[laneAscended])))
-	right := agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
+	right := m.modelLabel() + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
 	if lipgloss.Width(right) > m.w/2 {
 		right = counts
 	}
@@ -334,13 +336,14 @@ func (m *Model) targetLine() string {
 }
 
 func (m *Model) composeView(title, submit string) string {
-	opts := sDim.Render("agent ") + m.chip("tab", "tab", "") + " " + m.mark("key:tab", agentLabel(m.opt.Agent)) +
+	opts := sDim.Render("model ") + m.chip("tab", "tab", "") + " " + m.mark("key:tab", m.modelLabel()) +
 		sDim.Render("     mode ") + m.chip("ctrl+y", "ctrl+y", "") + " " + m.mark("key:ctrl+y", approvalLabel(string(m.opt.Approval)))
 	body := strings.Join([]string{
 		m.ta.View(),
 		"",
 		opts,
 		m.targetLine(),
+		m.limitsLine(m.modalWidth() - 4),
 		"",
 		hints(m.modalWidth()-4, m.chip("enter", "⏎", submit), m.chip("alt+enter", "alt+⏎", "newline"), m.chip("esc", "esc", "cancel")),
 	}, "\n")
@@ -351,7 +354,7 @@ func (m *Model) planningView() string {
 	el := time.Since(m.planStart).Round(time.Second)
 	spin := sparkle[(m.frame/3)%len(sparkle)]
 	body := sGoldB.Render(spin+" the choir deliberates "+spin) + "\n\n" +
-		sDim.Render("planner ") + agentLabel(m.opt.Agent) + sDim.Render(fmt.Sprintf(" · read-only · %s", el)) + "\n\n" +
+		sDim.Render("planner ") + m.modelLabel() + sDim.Render(fmt.Sprintf(" · read-only · %s", el)) + "\n\n" +
 		sIvory.Render(trunc(m.planGoal, m.modalWidth()-6)) + "\n\n" +
 		hints(m.modalWidth()-4, m.chip("esc", "esc", "cancel"))
 	return modal("✦ DIVINING", body, m.modalWidth())
