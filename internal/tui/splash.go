@@ -86,7 +86,7 @@ func titleAt(el time.Duration, frame int) string {
 		}
 	}
 	if el >= titleDone() {
-		return sGold.Render("✧") + "  " + b.String() + "  " + sGold.Render("✧")
+		return sGold.Render(spinStar(frame, false)) + "  " + b.String() + "  " + sGold.Render(spinStar(frame, true))
 	}
 	return "   " + b.String() + "   "
 }
@@ -313,4 +313,16 @@ func (m *Model) splashProject() string {
 		notes = sFaint.Render(" · ") + sLavender.Render("obsidian ✓")
 	}
 	return sLavender.Bold(true).Render("◈ "+trunc(m.project.Name, 20)) + sFaint.Render(fmt.Sprintf(" · %d open todo", open)) + notes
+}
+
+var spinFrames = []string{"✦", "✶", "✕", "✶"}
+
+const spinEvery = 4
+
+func spinStar(frame int, reverse bool) string {
+	i := (frame / spinEvery) % len(spinFrames)
+	if reverse {
+		i = (len(spinFrames) - i) % len(spinFrames)
+	}
+	return spinFrames[i]
 }
