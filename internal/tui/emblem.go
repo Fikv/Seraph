@@ -14,7 +14,7 @@ import (
 
 const (
 	emblemW     = 35
-	emblemH     = 5
+	emblemH     = 4
 	emblemBuild = 1100 * time.Millisecond
 	emblemLap   = 5200 * time.Millisecond
 	glitchEvery = 7 * time.Second
@@ -55,11 +55,13 @@ type orbitPoint struct {
 var (
 	emblemBase  [emblemH][emblemW]emblemCell
 	emblemOrbit []orbitPoint
-	wordLeft    = 5
-	wordRight   = 29
 )
 
-func behindWord(x, y int) bool { return y >= 1 && y <= 3 && x >= wordLeft && x <= wordRight }
+var wordSpan [emblemH][2]int
+
+func behindWord(x, y int) bool {
+	return y >= 0 && y < emblemH && wordSpan[y][1] > 0 && x >= wordSpan[y][0]-1 && x <= wordSpan[y][1]+1
+}
 
 func init() {
 	for y := range emblemBase {
@@ -81,12 +83,21 @@ func init() {
 			line = append(line, emblemFont[r][row])
 		}
 		x := left + (2 - row)
-		put(1+row, x, strings.Join(line, " "), sEmblemWord, true)
+		put(row, x, strings.Join(line, " "), sEmblemWord, true)
 	}
-	put(1, left+2+23+1, "━━╸", sEmblemBlade, false)
-	put(3, left-4, "╺━━━", sEmblemBlade, false)
+	put(0, left+2+23+1, "━━╸", sEmblemBlade, false)
+	put(2, left-4, "╺━━━", sEmblemBlade, false)
 
-	cx, cy, rx, ry, tilt := 17.0, 2.0, 16.6, 2.15, -0.07
+	for y := range emblemBase {
+		wordSpan[y] = [2]int{emblemW, 0}
+		for x := range emblemBase[y] {
+			if emblemBase[y][x].r != " " {
+				wordSpan[y][0], wordSpan[y][1] = min(wordSpan[y][0], x), max(wordSpan[y][1], x)
+			}
+		}
+	}
+
+	cx, cy, rx, ry, tilt := 17.0, 1.45, 16.6, 1.6, -0.07
 	type cellPt struct {
 		x, y  int
 		front bool
@@ -160,7 +171,7 @@ func emblem(el time.Duration) []string {
 		if el%glitchEvery < glitchFor && window > 0 {
 			for k := 0; k < 3; k++ {
 				h := hash32(window, k)
-				y, x := 1+int(h%3), int(h>>8)%emblemW
+				y, x := int(h%3), int(h>>8)%emblemW
 				if g[y][x].word {
 					g[y][x] = emblemCell{r: glitchGlyphs[(h>>16)%uint32(len(glitchGlyphs))], style: sGlitch}
 				}
