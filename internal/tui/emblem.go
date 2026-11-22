@@ -13,23 +13,15 @@ import (
 )
 
 const (
-	emblemW     = 35
-	emblemH     = 5
+	emblemW     = 21
+	emblemH     = 3
 	emblemBuild = 1100 * time.Millisecond
-	emblemLap   = 5200 * time.Millisecond
+	emblemLap   = 4200 * time.Millisecond
 	glitchEvery = 7 * time.Second
 	glitchFor   = 160 * time.Millisecond
 )
 
 var (
-	emblemFont = map[rune][3]string{
-		'S': {"┏━╸", "┗━┓", "━━┛"},
-		'E': {"┏━╸", "┣━ ", "┗━╸"},
-		'R': {"┏━┓", "┣┳┛", "╹┗╸"},
-		'A': {"┏━┓", "┣━┫", "╹ ╹"},
-		'P': {"┏━┓", "┣━┛", "╹  "},
-		'H': {"╻ ╻", "┣━┫", "╹ ╹"},
-	}
 	glitchGlyphs = []string{"▖", "▘", "▝", "▗", "▚", "▞", "▙", "▟"}
 	sEmblemWord  = t.FG(t.Ivory).Bold(true)
 	sEmblemBlade = t.FG(t.Gold)
@@ -55,11 +47,11 @@ type orbitPoint struct {
 var (
 	emblemBase  [emblemH][emblemW]emblemCell
 	emblemOrbit []orbitPoint
-	wordLeft    = 5
-	wordRight   = 29
+	wordLeft    = 2
+	wordRight   = 18
 )
 
-func behindWord(x, y int) bool { return y >= 1 && y <= 3 && x >= wordLeft && x <= wordRight }
+func behindWord(x, y int) bool { return y == 1 && x >= wordLeft && x <= wordRight }
 
 func init() {
 	for y := range emblemBase {
@@ -74,56 +66,26 @@ func init() {
 			}
 		}
 	}
-	const left = 5
-	for row := 0; row < 3; row++ {
-		var line []string
-		for _, r := range "SERAPH" {
-			line = append(line, emblemFont[r][row])
-		}
-		x := left + (2 - row)
-		put(1+row, x, strings.Join(line, " "), sEmblemWord, true)
-	}
-	put(1, left+2+23+1, "━━╸", sEmblemBlade, false)
-	put(3, left-4, "╺━━━", sEmblemBlade, false)
+	put(1, 2, "╺━", sEmblemBlade, false)
+	put(1, 5, "S E R A P H", sEmblemWord, true)
+	put(1, 17, "━╸", sEmblemBlade, false)
 
-	cx, cy, rx, ry, tilt := 17.0, 2.0, 16.6, 2.15, -0.07
-	type cellPt struct {
-		x, y  int
-		front bool
-		slope float64
+	const l, r = 1, emblemW - 2
+	add := func(x, y int, glyph string, front bool) {
+		emblemOrbit = append(emblemOrbit, orbitPoint{x: x, y: y, glyph: glyph, front: front})
 	}
-	var cells []cellPt
-	const dense = 1200
-	for i := 0; i < dense; i++ {
-		a := 2 * math.Pi * float64(i) / dense
-		px := rx*math.Cos(a)*math.Cos(tilt) - ry*2*math.Sin(a)*math.Sin(tilt)
-		py := (rx*math.Cos(a)*math.Sin(tilt))/2 + ry*math.Sin(a)*math.Cos(tilt)
-		dx := -rx*math.Sin(a)*math.Cos(tilt) - ry*2*math.Cos(a)*math.Sin(tilt)
-		dy := (-rx*math.Sin(a)*math.Sin(tilt))/2 + ry*math.Cos(a)*math.Cos(tilt)
-		c := cellPt{x: int(math.Round(cx + px)), y: int(math.Round(cy + py)), front: math.Sin(a) > 0, slope: dy * 2 / dx}
-		if n := len(cells); n > 0 && cells[n-1].x == c.x && cells[n-1].y == c.y {
-			continue
-		}
-		cells = append(cells, c)
+	add(l, 0, "╭", false)
+	for x := l + 1; x < r; x++ {
+		add(x, 0, "─", false)
 	}
-	if n := len(cells); n > 1 && cells[0] == cells[n-1] {
-		cells = cells[:n-1]
+	add(r, 0, "╮", false)
+	add(r, 1, "│", true)
+	add(r, 2, "╯", true)
+	for x := r - 1; x > l; x-- {
+		add(x, 2, "─", true)
 	}
-	n := len(cells)
-	for i, c := range cells {
-		prev, next := cells[(i-1+n)%n], cells[(i+1)%n]
-		glyph := "─"
-		switch {
-		case prev.x == c.x && next.x == c.x:
-			glyph = "│"
-		case c.y != prev.y || c.y != next.y:
-			glyph = "╲"
-			if c.slope < 0 {
-				glyph = "╱"
-			}
-		}
-		emblemOrbit = append(emblemOrbit, orbitPoint{x: c.x, y: c.y, front: c.front, glyph: glyph})
-	}
+	add(l, 2, "╰", true)
+	add(l, 1, "│", true)
 }
 
 func hash32(a, b int) uint32 {
@@ -160,7 +122,7 @@ func emblem(el time.Duration) []string {
 		if el%glitchEvery < glitchFor && window > 0 {
 			for k := 0; k < 3; k++ {
 				h := hash32(window, k)
-				y, x := 1+int(h%3), int(h>>8)%emblemW
+				y, x := 1, int(h>>8)%emblemW
 				if g[y][x].word {
 					g[y][x] = emblemCell{r: glitchGlyphs[(h>>16)%uint32(len(glitchGlyphs))], style: sGlitch}
 				}
@@ -253,18 +215,19 @@ func (m *Model) emblemHeader() string {
 		sGold.Render(fmt.Sprintf("✦ %d ascended", len(ls[laneAscended])))
 	tag := sFaint.Render("ORCHESTRATE THE CHOIR") + sFaint.Render("  ·  v"+m.opt.Version)
 	spent := sFaint.Render(fmt.Sprintf("%d %s · %s spent", workers, map[bool]string{true: "worker", false: "workers"}[workers == 1], money(cost)))
-	right := []string{
-		tag,
-		m.projectLabel() + "  " + sDim.Render(m.repoText),
-		agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)),
-		counts,
-		spent,
+	project := m.projectLabel() + "  " + sDim.Render(m.repoText)
+	agentLine := agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval))
+	var right []string
+	switch {
+	case artH >= 5:
+		right = []string{tag, project, agentLine, counts, spent}
+	case artH == 4:
+		right = []string{tag, project, agentLine, counts + sFaint.Render("  ·  ") + spent}
+	default:
+		right = []string{tag, project + sFaint.Render("   ") + agentLine, counts + sFaint.Render("  ·  ") + spent}
 	}
-	if artH < len(right) {
-		right[artH-1] = counts + sFaint.Render("  ·  ") + spent
-		if lipgloss.Width(right[artH-1]) > m.w-artW-2 {
-			right[artH-1] = counts
-		}
+	for len(right) < artH {
+		right = append(right, "")
 	}
 	avail := m.w - artW - 2
 	var lines []string
