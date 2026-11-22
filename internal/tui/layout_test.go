@@ -233,6 +233,7 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.permitSnooze["p1"] = time.Now().Add(time.Hour)
 		},
 		"detail-select": func(m *Model) { m.openDetail("s00000"); m.toggleSelectMode() },
+		"detail-chat":   func(m *Model) { m.openDetail("s00000"); m.handleKey(keyMsg("tab")) },
 		"todo-form-model": func(m *Model) {
 			p := m.projects[0]
 			m.useProject(&p)
@@ -241,8 +242,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
 		},
 	}
-	if len(screens) != 42 {
-		t.Fatalf("expected 42 screens under test, got %d", len(screens))
+	if len(screens) != 43 {
+		t.Fatalf("expected 43 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -705,5 +706,69 @@ func TestPermissionModal(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if _, ok := m.currentPermission(); ok {
 		t.Fatal("esc snoozes the request")
+	}
+}
+
+func TestChatViewHidesProcess(t *testing.T) {
+	evs := []agent.Event{
+		{Kind: agent.KindUser, Text: "write the README"},
+		{Kind: agent.KindInit},
+		{Kind: agent.KindThinking, Text: "SECRET-THOUGHT"},
+		{Kind: agent.KindText, Text: "NARRATION I will read files first"},
+		{Kind: agent.KindToolStart, Tool: "Bash", Text: "TOOLCALL cat package.json"},
+		{Kind: agent.KindToolEnd},
+		{Kind: agent.KindText, Text: "FINAL README is ready"},
+		{Kind: agent.KindResult, Text: "FINAL README is ready", Cost: 0.01},
+		{Kind: agent.KindSystem, Text: "committed abc on seraph/x"},
+		{Kind: agent.KindUser, Text: "now push it"},
+		{Kind: agent.KindToolStart, Tool: "Bash", Text: "git push"},
+		{Kind: agent.KindError, Text: "BOOM permission denied"},
+	}
+	out := ansi.Strip(renderChat(evs, "claude", 100, false))
+	for _, want := range []string{"write the README", "FINAL README is ready", "now push it", "BOOM permission denied", "steps hidden"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("chat view lacks %q:\n%s", want, out)
+		}
+	}
+	for _, hidden := range []string{"SECRET-THOUGHT", "NARRATION", "TOOLCALL", "committed abc"} {
+		if strings.Contains(out, hidden) {
+			t.Errorf("chat view must hide %q", hidden)
+		}
+	}
+	if strings.Count(out, "FINAL README is ready") != 1 {
+		t.Error("the final answer must appear once")
+	}
+	running := ansi.Strip(renderChat(evs[:5], "claude", 100, true))
+	if !strings.Contains(running, "working…") || strings.Contains(running, "NARRATION") {
+		t.Errorf("a running turn shows a placeholder, not narration:\n%s", running)
+	}
+	if stopped := ansi.Strip(renderChat(evs[:5], "claude", 100, false)); !strings.Contains(stopped, "NARRATION") {
+		t.Error("a turn that ended without a result shows the last thing the agent said")
+	}
+	full := ansi.Strip(renderTranscript(evs, "claude", 100))
+	if !strings.Contains(full, "SECRET-THOUGHT") || !strings.Contains(full, "TOOLCALL") {
+		t.Error("the full view keeps everything")
+	}
+}
+
+func TestChatViewToggleSticks(t *testing.T) {
+	m := testModel(t)
+	m.w, m.h = 120, 40
+	m.openDetail("s00000")
+	m.handleKey(keyMsg("tab"))
+	if !m.chatView || m.mgr.Store().Setting(TranscriptViewSetting) != "chat" {
+		t.Fatal("tab switches to the conversation view and remembers it")
+	}
+	if strings.Contains(ansi.Strip(m.vp.View()), "⟢ Bash") {
+		t.Fatal("tool calls must be hidden")
+	}
+	m2 := newModel(m.mgr, m.opt)
+	if !m2.chatView {
+		t.Fatal("the choice must survive a restart")
+	}
+	m.handleKey(keyMsg("tab"))
+	m.vp.GotoTop()
+	if m.chatView || m.mgr.Store().Setting(TranscriptViewSetting) != "full" || !strings.Contains(ansi.Strip(m.vp.View()), "Bash") {
+		t.Fatal("tab brings the full transcript back")
 	}
 }

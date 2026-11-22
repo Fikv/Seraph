@@ -291,6 +291,9 @@ func (m *Model) detailView() string {
 		return m.boardView()
 	}
 	info1 := agentLabel(s.Agent) + "  " + sTitle.Render(trunc(s.Title, m.w/2)) + "  " + statusPill(s.Status, m.frame)
+	if m.chatView {
+		info1 += "  " + sFaint.Render("☰ conversation only")
+	}
 	where := sDim.Render("dir ") + sDim.Render(s.Dir)
 	if s.Branch != "" {
 		where = sDim.Render("branch ") + sLavender.Render(s.Branch) + sDim.Render(" off "+orDefault(s.Base, "HEAD")) + sDim.Render("  ·  ") + sMint.Render(orDefault(m.wsSummary, "…")) + sDim.Render("  ·  ") + sFaint.Render(s.Dir)
@@ -307,7 +310,11 @@ func (m *Model) detailView() string {
 	if m.selectMode {
 		selLabel = "mouse back"
 	}
-	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), m.chip("ctrl+t", "ctrl+t", selLabel), m.chip("ctrl+o", "ctrl+o", "copy answer"),
+	viewLabel := "hide thinking"
+	if m.chatView {
+		viewLabel = "show thinking"
+	}
+	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), m.chip("tab", "tab", viewLabel), m.chip("ctrl+t", "ctrl+t", selLabel), m.chip("ctrl+o", "ctrl+o", "copy answer"),
 		m.chip("ctrl+g", "ctrl+g", "diff"), key("↑↓ wheel", "scroll"), m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
 	if m.selectMode {
 		keys = hints(m.w, sGold.Render("✂ SELECT MODE"), sDim.Render("drag to select, ctrl+shift+c copies"), m.chip("ctrl+t", "ctrl+t", "mouse back"))
@@ -329,6 +336,115 @@ func (m *Model) detailView() string {
 		m.fi.View(),
 		keys,
 	}, "\n")
+}
+
+type chatTurn struct {
+	user    string
+	blocks  []string
+	result  string
+	errs    []string
+	hidden  int
+	done    bool
+	isError bool
+	cost    float64
+}
+
+func chatTurns(evs []agent.Event) []chatTurn {
+	var turns []chatTurn
+	cur := -1
+	lastWasText := false
+	ensure := func() {
+		if cur < 0 {
+			turns = append(turns, chatTurn{})
+			cur = 0
+		}
+	}
+	for _, ev := range evs {
+		text := clean(ev.Text)
+		switch ev.Kind {
+		case agent.KindInit:
+			continue
+		case agent.KindUser:
+			turns = append(turns, chatTurn{user: text})
+			cur = len(turns) - 1
+			lastWasText = false
+			continue
+		}
+		ensure()
+		t := &turns[cur]
+		switch ev.Kind {
+		case agent.KindText:
+			if lastWasText && len(t.blocks) > 0 {
+				t.blocks[len(t.blocks)-1] += "\n" + text
+			} else {
+				t.blocks = append(t.blocks, text)
+			}
+			lastWasText = true
+			continue
+		case agent.KindResult:
+			t.done, t.isError, t.cost = true, ev.IsError, ev.Cost
+			t.result = strings.TrimSpace(text)
+		case agent.KindError:
+			t.errs = append(t.errs, text)
+		case agent.KindToolEnd:
+			if ev.IsError {
+				t.hidden++
+			}
+		case agent.KindThinking, agent.KindToolStart, agent.KindSystem:
+			t.hidden++
+		}
+		lastWasText = false
+	}
+	return turns
+}
+
+func (t chatTurn) answer() (string, int) {
+	if t.result != "" && !t.isError {
+		return t.result, len(t.blocks)
+	}
+	if n := len(t.blocks); n > 0 {
+		return t.blocks[n-1], n - 1
+	}
+	return "", 0
+}
+
+func renderChat(evs []agent.Event, agentName string, width int, live bool) string {
+	w := max(width-2, 10)
+	var b strings.Builder
+	turns := chatTurns(evs)
+	for i, t := range turns {
+		running := live && i == len(turns)-1 && !t.done
+		if t.user != "" {
+			b.WriteString("\n" + sLavender.Bold(true).Render("☩ you") + "\n")
+			b.WriteString(md.Render(t.user, w) + "\n")
+		}
+		answer, skipped := t.answer()
+		if running {
+			answer, skipped = "", len(t.blocks)
+		}
+		hidden := t.hidden + skipped
+		if hidden > 0 {
+			label := fmt.Sprintf("∴ %d step", hidden)
+			if hidden != 1 {
+				label += "s"
+			}
+			b.WriteString(sFaint.Render("  "+label+" hidden · tab shows everything") + "\n")
+		}
+		switch {
+		case answer != "":
+			b.WriteString("\n" + sGoldB.Render("✧ "+agentName) + "\n")
+			b.WriteString(md.Render(answer, w) + "\n")
+		case running && len(t.errs) == 0:
+			b.WriteString(sDim.Render("  ✧ working…") + "\n")
+		}
+		for _, e := range t.errs {
+			b.WriteString(sRose.Width(w).Render("✗ "+e) + "\n")
+		}
+		if t.done && t.isError && t.result != "" {
+			b.WriteString(sRose.Width(w).Render("✗ "+t.result) + "\n")
+		}
+	}
+	return strings.TrimLeft(b.String(), "\n")
 }
 
 func renderTranscript(evs []agent.Event, agentName string, width int) string {
