@@ -152,6 +152,7 @@ var migrations = []string{
 	CREATE INDEX todos_project ON todos(project_id, status, priority DESC, created_at);
 	ALTER TABLE sessions ADD COLUMN project_id TEXT NOT NULL DEFAULT '';
 	ALTER TABLE sessions ADD COLUMN todo_id TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE todos ADD COLUMN model TEXT NOT NULL DEFAULT '';`,
 }
 
 func Open() (*Store, error) {

@@ -21,6 +21,7 @@ func (fakeDriver) Binary() string { return "sh" }
 func (f fakeDriver) Args(s agent.Spec) []string {
 	dirs, _ := json.Marshal(s.AddDirs)
 	script := `echo '{"type":"system","subtype":"init","session_id":"fake-1"}'
+echo '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.37,"resetsAt":1795297200},"seven_day":{"utilization":0.05,"resetsAt":1795597200}}}}'
 sleep ` + f.sleep + `
 echo "$SERAPH_TEST_NOTE" > work.txt
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"dirs ` + strings.ReplaceAll(string(dirs), `"`, `\"`) + ` approval ` + string(s.Approval) + ` explain ` + fmt.Sprint(strings.Contains(s.SystemPrompt, "answering the user")) + `"}]}}'
@@ -97,7 +98,16 @@ func TestDispatchAndSchedule(t *testing.T) {
 	}
 
 	waitFor(t, "t1 in review", func() bool { x, _, _ := st.Todo("t1"); return x.Status == store.TodoReview })
+	lim, ok := m.Limits("fake")
+	if !ok || len(lim.Windows) != 2 || lim.Windows[0].Window != "five_hour" || lim.Windows[0].Utilization != 0.37 {
+		t.Fatalf("limits = %+v ok=%v", lim, ok)
+	}
 	evs, _ := m.Log(t1.SessionID)
+	for _, ev := range evs {
+		if ev.Kind == agent.KindLimits {
+			t.Fatal("limit events must not show up in the transcript")
+		}
+	}
 	var sawDirs, sawCommit bool
 	for _, ev := range evs {
 		sawDirs = sawDirs || strings.Contains(ev.Text, notes)

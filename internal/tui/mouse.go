@@ -138,6 +138,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.followLink(m.notes.links[i])
 			}
 		}
+	case "model":
+		return m.modelClick(arg)
 	case "dfile", "hunk":
 		if m.diff != nil {
 			return m.diffClick(kind, arg)
@@ -220,7 +222,7 @@ func (m *Model) menuItems() [][]menuItem {
 		{
 			{"x", "X", "stop", running},
 			{"d", "D", "release", hasSel},
-			{"a", "A", "agent: " + m.opt.Agent, true},
+			{"a", "A", "model", true},
 			{"y", "Y", "mode: " + string(m.opt.Approval), true},
 		},
 		{

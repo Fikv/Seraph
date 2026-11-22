@@ -100,7 +100,10 @@ func (m *Manager) Dispatch(todoID string, d Defaults) (string, error) {
 	}
 	ag := firstNonEmpty(t.Agent, p.DefaultAgent, d.Agent, "claude")
 	model := ""
-	if ag == d.Agent {
+	switch {
+	case t.Agent != "" && t.Model != "":
+		model = t.Model
+	case ag == d.Agent:
 		model = d.Model
 	}
 	task := t.Title

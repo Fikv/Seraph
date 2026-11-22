@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,6 +39,7 @@ const (
 	scrTodos
 	scrNotes
 	scrDiff
+	scrModels
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -61,6 +64,7 @@ type Options struct {
 	SkipSplash bool
 	Version    string
 	Storage    string
+	AgentSet   bool
 	Updates    <-chan string
 }
 
@@ -108,22 +112,27 @@ type Model struct {
 
 	mcp *mcpState
 
-	project      *store.Project
-	projects     []store.Project
-	projSel      int
-	projForm     *projectForm
-	projRemoving string
-	todos        []store.Todo
-	todosAt      time.Time
-	todoCol      int
-	todoIdx      [5]int
-	todoForm     *todoForm
-	todoRemoving string
-	todoSelID    string
-	notesCache   map[string]notesEntry
-	backTo       screen
-	notes        *notesState
-	diff         *diffState
+	project        *store.Project
+	projects       []store.Project
+	projSel        int
+	projForm       *projectForm
+	projRemoving   string
+	todos          []store.Todo
+	todosAt        time.Time
+	todoCol        int
+	todoIdx        [5]int
+	todoForm       *todoForm
+	todoRemoving   string
+	todoSelID      string
+	notesCache     map[string]notesEntry
+	backTo         screen
+	notes          *notesState
+	picker         *modelPicker
+	cursorModels   []agent.Model
+	catalogLoading bool
+	catalogErr     string
+	cursorPlan     string
+	diff           *diffState
 
 	hover       string
 	zoneIDs     []string
@@ -164,6 +173,12 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20)}
 	m.loadCurrentProject()
 	m.logoStyle = logoStyleFor(mgr.Store().Setting(LogoStyleSetting))
+	if !opt.AgentSet {
+		if a := mgr.Store().Setting(DefaultAgentSetting); a == "claude" || a == "cursor" {
+			m.opt.Agent = a
+			m.opt.Model = mgr.Store().Setting(DefaultModelSetting)
+		}
+	}
 	m.repoText = m.repoLabel()
 	if opt.SkipSplash {
 		m.scr = scrBoard
@@ -196,7 +211,7 @@ func (m *Model) tickEvery() time.Duration {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(tick(m.tickEvery()), m.probeVersions(), waitBus(m.opt.Updates))
+	return tea.Batch(tick(m.tickEvery()), m.probeVersions(), waitBus(m.opt.Updates), m.loadCatalog(), m.probePlan())
 }
 
 func waitBus(ch <-chan string) tea.Cmd {
@@ -279,6 +294,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mgr.Refresh()
 		m.lastRefresh = time.Now()
 		return m, waitBus(m.opt.Updates)
+	case catalogMsg:
+		m.catalogLoading = false
+		if msg.err != nil {
+			m.catalogErr = msg.err.Error()
+		} else {
+			m.cursorModels, m.catalogErr = msg.models, ""
+			if m.picker != nil {
+				m.applyModelFilter()
+			}
+		}
+		return m, nil
+	case cursorPlanMsg:
+		m.cursorPlan = string(msg)
+		return m, nil
 	case versionsMsg:
 		m.versions = msg
 		return m, nil
@@ -387,6 +416,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.notesKey(k)
 	case scrDiff:
 		return m.diffKey(k)
+	case scrModels:
+		return m.modelsKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -469,7 +500,7 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 	case "s":
 		m.restartSplash()
 	case "a":
-		m.opt.Agent = agent.Next(m.opt.Agent)
+		return m, m.openModelPicker(scrBoard, m.setDefaultModel)
 	case "y":
 		m.toggleApproval()
 	case "x":
@@ -600,8 +631,12 @@ func (m *Model) composeKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scr = scrBoard
 		return m, nil
 	case "tab":
-		m.opt.Agent = agent.Next(m.opt.Agent)
-		return m, nil
+		back := m.scr
+		m.ta.Blur()
+		return m, m.openModelPicker(back, func(md agent.Model) {
+			m.setDefaultModel(md)
+			m.ta.Focus()
+		})
 	case "ctrl+y":
 		m.toggleApproval()
 		return m, nil
@@ -731,4 +766,33 @@ func (m *Model) repoLabel() string {
 		return "no repo · " + filepath.Base(m.opt.Dir)
 	}
 	return filepath.Base(r) + " ⎇ " + workspace.CurrentBranch(r)
+}
+
+type cursorPlanMsg string
+
+func (m *Model) probePlan() tea.Cmd {
+	c := m.cache()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if v, ok := c.CacheGet(ctx, "cursor:plan"); ok {
+			return cursorPlanMsg(v)
+		}
+		bin, err := agent.Locate(agent.Cursor{})
+		if err != nil {
+			return nil
+		}
+		out, err := exec.CommandContext(ctx, bin, "about", "--format", "json").Output()
+		if err != nil {
+			return nil
+		}
+		var about struct {
+			Tier string `json:"subscriptionTier"`
+		}
+		if json.Unmarshal(out, &about) != nil || about.Tier == "" {
+			return nil
+		}
+		c.CacheSet(ctx, "cursor:plan", "plan "+about.Tier, time.Hour)
+		return cursorPlanMsg("plan " + about.Tier)
+	}
 }

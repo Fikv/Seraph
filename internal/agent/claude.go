@@ -1,6 +1,9 @@
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Claude struct{}
 
@@ -55,6 +58,17 @@ type claudeLine struct {
 	Result    string  `json:"result"`
 	IsError   bool    `json:"is_error"`
 	TotalCost float64 `json:"total_cost_usd"`
+	RateLimit struct {
+		Status         string   `json:"status"`
+		ResetsAt       int64    `json:"resetsAt"`
+		RateLimitType  string   `json:"rateLimitType"`
+		Utilization    *float64 `json:"utilization"`
+		UnifiedWindows map[string]struct {
+			Utilization float64 `json:"utilization"`
+			ResetsAt    int64   `json:"resetsAt"`
+			Status      string  `json:"status"`
+		} `json:"unifiedWindows"`
+	} `json:"rate_limit_info"`
 }
 
 func (Claude) Parse(line []byte) []Event {
@@ -92,8 +106,28 @@ func (Claude) Parse(line []byte) []Event {
 		return out
 	case "result":
 		return []Event{{Kind: KindResult, Text: l.Result, IsError: l.IsError, Cost: l.TotalCost, SessionID: l.SessionID}}
+	case "rate_limit_event":
+		var limits []Limit
+		for w, v := range l.RateLimit.UnifiedWindows {
+			limits = append(limits, Limit{Window: w, Utilization: v.Utilization, ResetsAt: unixTime(v.ResetsAt), Status: v.Status})
+		}
+		if len(limits) == 0 && l.RateLimit.RateLimitType != "" && l.RateLimit.Utilization != nil {
+			limits = append(limits, Limit{Window: l.RateLimit.RateLimitType, Utilization: *l.RateLimit.Utilization, ResetsAt: unixTime(l.RateLimit.ResetsAt), Status: l.RateLimit.Status})
+		}
+		if len(limits) == 0 {
+			return nil
+		}
+		SortLimits(limits)
+		return []Event{{Kind: KindLimits, Limits: limits}}
 	}
 	return nil
+}
+
+func unixTime(s int64) time.Time {
+	if s == 0 {
+		return time.Time{}
+	}
+	return time.Unix(s, 0)
 }
 
 func toolResultText(b claudeBlock) string {

@@ -562,6 +562,10 @@ func (m *Manager) commit(id string, s store.Session, prompt string) {
 }
 
 func (m *Manager) record(id string, ev agent.Event) {
+	if ev.Kind == agent.KindLimits {
+		m.saveLimits(id, ev.Limits)
+		return
+	}
 	m.mu.Lock()
 	s := m.sessions[id]
 	if s == nil {
@@ -705,4 +709,32 @@ func branchOr(b string) string {
 		return "(no worktree: shared directory)"
 	}
 	return b
+}
+
+func limitsKey(agentName string) string { return "limits:" + agentName }
+
+func (m *Manager) saveLimits(sessionID string, ls []agent.Limit) {
+	m.mu.Lock()
+	s := m.sessions[sessionID]
+	m.mu.Unlock()
+	name := "claude"
+	if s != nil {
+		name = s.Agent
+	}
+	data, err := json.Marshal(agent.Limits{Agent: name, Windows: ls, Captured: time.Now()})
+	if err == nil {
+		_ = m.st.SetSetting(limitsKey(name), string(data))
+	}
+}
+
+func (m *Manager) Limits(agentName string) (agent.Limits, bool) {
+	raw := m.st.Setting(limitsKey(agentName))
+	if raw == "" {
+		return agent.Limits{}, false
+	}
+	var l agent.Limits
+	if json.Unmarshal([]byte(raw), &l) != nil {
+		return agent.Limits{}, false
+	}
+	return l, true
 }

@@ -267,9 +267,16 @@ func (m *Model) emblemHeader() string {
 	right := []string{
 		tag,
 		m.projectLabel() + "  " + sDim.Render(m.repoText),
-		agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)),
+		m.modelLabel() + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)),
 		counts,
 		spent,
+	}
+	if _, ok := m.mgr.Limits("claude"); ok {
+		if lim := m.claudeLimits(6, true); lipgloss.Width(lim)+lipgloss.Width(tag)+5 <= m.w-artW-8 {
+			right[0] = lim + sFaint.Render("  ·  ") + tag
+		} else if lipgloss.Width(lim) <= m.w-artW-8 {
+			right[0] = lim
+		}
 	}
 	if artH < len(right) {
 		right[artH-1] = counts + sFaint.Render("  ·  ") + spent

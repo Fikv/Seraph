@@ -100,6 +100,8 @@ func testModel(t *testing.T) *Model {
 		}
 	}
 	m.loadProjects()
+	m.cursorModels = agent.ParseCursorModels("auto - Auto (default)\ngpt-5.3-codex-high - Codex 5.3 High\nclaude-opus-5-5-high - Claude Opus 5.5 1M High\ngemini-3.1-pro - Gemini 3.1 Pro\ngrok-4.7-high - Grok 4.7 High\nmuse-spark-1.3 - Muse Spark 1.3\nkimi-k3 - Kimi K3\nglm-5.2 - GLM 5.2\n" + strings.Repeat("x", 120) + " - " + strings.Repeat("Very long model name ", 8) + "\n")
+	st.SetSetting("limits:claude", `{"agent":"claude","windows":[{"window":"five_hour","utilization":0.62,"resets_at":"`+time.Now().Add(3*time.Hour).Format(time.RFC3339)+`"},{"window":"seven_day","utilization":0.91,"resets_at":"`+time.Now().Add(80*time.Hour).Format(time.RFC3339)+`"}],"captured":"`+time.Now().Format(time.RFC3339)+`"}`)
 
 	wt, branch, err := workspace.Create(t.TempDir(), repo, "dfx001")
 	if err != nil {
@@ -187,9 +189,23 @@ func TestLayoutFitsTerminal(t *testing.T) {
 		},
 		"diff":     func(m *Model) { m.openDiff("dfx001", scrBoard); m.diff.focus = 1 },
 		"diff-ask": func(m *Model) { m.openDiff("dfx001", scrBoard); m.startAsk(false) },
+		"models":   func(m *Model) { m.openModelPicker(scrBoard, m.setDefaultModel); m.picker.sel = 9 },
+		"models-filter": func(m *Model) {
+			m.openModelPicker(scrBoard, m.setDefaultModel)
+			m.picker.filter.SetValue("zzz")
+			m.applyModelFilter()
+			m.catalogErr = strings.Repeat("boom ", 30)
+		},
+		"todo-form-model": func(m *Model) {
+			p := m.projects[0]
+			m.useProject(&p)
+			m.openTodos()
+			m.openTodoForm(nil)
+			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
+		},
 	}
-	if len(screens) != 23 {
-		t.Fatalf("expected 23 screens under test, got %d", len(screens))
+	if len(screens) != 26 {
+		t.Fatalf("expected 26 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -378,5 +394,36 @@ func TestLineMark(t *testing.T) {
 	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "╭──╴ ╭──╴ ╭──╮") || !strings.Contains(out, "ORCHESTRATE THE CHOIR") || !strings.Contains(out, "spent") {
 		t.Fatal("board should show the line logo with the poster info")
+	}
+}
+
+func TestModelPickerFlow(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h = 120, 40
+	m.openModelPicker(scrBoard, m.setDefaultModel)
+	for _, r := range "grok" {
+		m.modelsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if len(m.picker.view) != 1 {
+		t.Fatalf("filter grok -> %d rows", len(m.picker.view))
+	}
+	m.modelsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.scr != scrBoard || m.opt.Agent != "cursor" || m.opt.Model != "grok-4.7-high" {
+		t.Fatalf("picked %s/%s scr=%v", m.opt.Agent, m.opt.Model, m.scr)
+	}
+	if m.mgr.Store().Setting(DefaultModelSetting) != "grok-4.7-high" || m.mgr.Store().Setting(DefaultAgentSetting) != "cursor" {
+		t.Fatal("default model not persisted")
+	}
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "Grok 4.7 High") || !strings.Contains(v, "xAI") {
+		t.Fatalf("board header lacks model/provider:\n%s", v)
+	}
+	m.openModelPicker(scrBoard, m.setDefaultModel)
+	v = ansi.Strip(m.View())
+	for _, want := range []string{"Anthropic", "OpenAI", "Google", "Meta", "Moonshot AI", "5h", "62%", "7d", "91%"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("picker lacks %q", want)
+		}
 	}
 }

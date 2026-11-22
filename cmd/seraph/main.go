@@ -45,6 +45,7 @@ Usage:
   seraph redis up|down|status    optional Redis for live sync and caching
   seraph db                      show the SQLite database
   seraph doctor                  check that agents are installed
+  seraph models [filter]         models per agent with provider + usage limits
   seraph logo [cols] [rows]      print the angel emblem
   seraph logo style [line|orbit] choose the board/splash logo
 
@@ -62,6 +63,7 @@ State lives in %s (override with SERAPH_HOME).
 type common struct {
 	agent, model               string
 	yolo, noWorktree, noSplash bool
+	agentSet                   bool
 }
 
 func parseFlags(name string, args []string) (*common, []string, error) {
@@ -85,6 +87,12 @@ func parseFlags(name string, args []string) (*common, []string, error) {
 	if _, err := agent.Get(c.agent); err != nil {
 		return nil, nil, err
 	}
+	c.agentSet = os.Getenv("SERAPH_AGENT") != "" || c.model != ""
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "agent" || f.Name == "a" {
+			c.agentSet = true
+		}
+	})
 	return c, fs.Args(), nil
 }
 
@@ -116,6 +124,8 @@ func run(args []string) error {
 			return cmdDB()
 		case "doctor":
 			return cmdDoctor()
+		case "models":
+			return cmdModels(args[1:])
 		case "logo":
 			return cmdLogo(args[1:])
 		case "version", "--version", "-v":
@@ -161,7 +171,7 @@ func cmdTUI(c *common) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = tui.Run(mgr, tui.Options{
-		Repo: repo, Dir: dir, Agent: c.agent, Model: c.model,
+		Repo: repo, Dir: dir, Agent: c.agent, Model: c.model, AgentSet: c.agentSet,
 		Approval: c.approval(), SkipSplash: c.noSplash, Version: version,
 		Storage: stg.status, Updates: stg.bus.Subscribe(ctx),
 	})
