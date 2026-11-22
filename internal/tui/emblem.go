@@ -224,13 +224,22 @@ func emblemPlain(el time.Duration) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) cornerEmblem() bool { return m.h >= 26 && m.w >= emblemW+46 }
+func (m *Model) cornerEmblem() bool {
+	w, h := logoSize(m.logoStyle)
+	return m.h >= 22+h && m.w >= w+46
+}
+
+func (m *Model) logoLines() int {
+	_, h := logoSize(m.logoStyle)
+	return h
+}
 
 func (m *Model) emblemHeader() string {
 	if m.emblemStart.IsZero() {
 		m.emblemStart = time.Now()
 	}
-	art := emblem(time.Since(m.emblemStart))
+	art := logoArt(m.logoStyle, time.Since(m.emblemStart))
+	artW, artH := logoSize(m.logoStyle)
 	ls := m.lanes()
 	cost, workers := 0.0, 0
 	for l := range ls {
@@ -243,16 +252,23 @@ func (m *Model) emblemHeader() string {
 		sRose.Render(fmt.Sprintf("☩ %d need you", len(ls[laneNeeds]))) + sFaint.Render("  ·  ") +
 		sGold.Render(fmt.Sprintf("✦ %d ascended", len(ls[laneAscended])))
 	tag := sFaint.Render("ORCHESTRATE THE CHOIR") + sFaint.Render("  ·  v"+m.opt.Version)
+	spent := sFaint.Render(fmt.Sprintf("%d %s · %s spent", workers, map[bool]string{true: "worker", false: "workers"}[workers == 1], money(cost)))
 	right := []string{
 		tag,
 		m.projectLabel() + "  " + sDim.Render(m.repoText),
 		agentLabel(m.opt.Agent) + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)),
 		counts,
-		sFaint.Render(fmt.Sprintf("%d %s · %s spent", workers, map[bool]string{true: "worker", false: "workers"}[workers == 1], money(cost))),
+		spent,
 	}
-	avail := m.w - emblemW - 2
+	if artH < len(right) {
+		right[artH-1] = counts + sFaint.Render("  ·  ") + spent
+		if lipgloss.Width(right[artH-1]) > m.w-artW-2 {
+			right[artH-1] = counts
+		}
+	}
+	avail := m.w - artW - 2
 	var lines []string
-	for i := 0; i < emblemH; i++ {
+	for i := 0; i < artH; i++ {
 		r := right[i]
 		if lipgloss.Width(r) > avail {
 			r = ansi.Truncate(r, avail, "…")

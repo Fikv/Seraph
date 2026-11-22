@@ -332,6 +332,7 @@ func TestEmblem(t *testing.T) {
 	}
 
 	m := testModel(t)
+	m.logoStyle = LogoOrbit
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
 	m.scr = scrBoard
 	m.emblemStart = time.Now().Add(-5 * time.Second)
@@ -341,5 +342,41 @@ func TestEmblem(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if out := ansi.Strip(m.View()); strings.Contains(out, "┏━━╸ ┏━━╸") || !strings.Contains(out, "SERAPH") {
 		t.Fatal("small terminals should use the compact header")
+	}
+}
+
+func TestLineMark(t *testing.T) {
+	built := lineMark(3 * time.Second)
+	if len(built) != lineH {
+		t.Fatalf("rows = %d", len(built))
+	}
+	for i, r := range built {
+		if w := ansi.StringWidth(r); w != lineW {
+			t.Fatalf("row %d is %d wide, want %d", i, w, lineW)
+		}
+	}
+	plain := ansi.Strip(strings.Join(built, "\n"))
+	if !strings.Contains(plain, "╭──╴ ╭──╴ ╭──╮ ╭──╮ ╭──╮ ╷  ╷") || !strings.Contains(plain, "╶") {
+		t.Fatalf("line mark:\n%s", plain)
+	}
+	if strings.TrimSpace(ansi.Strip(strings.Join(lineMark(-time.Second), ""))) != "" {
+		t.Fatal("before the build everything should be blank")
+	}
+	if logoStyleFor("") != LogoLine || logoStyleFor(LogoOrbit) != LogoOrbit {
+		t.Fatal("default must be line, setting orbit selects the backup")
+	}
+	t.Setenv("SERAPH_LOGO", LogoOrbit)
+	if logoStyleFor("") != LogoOrbit {
+		t.Fatal("SERAPH_LOGO must override the setting")
+	}
+
+	m := testModel(t)
+	m.logoStyle = LogoLine
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
+	m.scr = scrBoard
+	m.emblemStart = time.Now().Add(-5 * time.Second)
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "╭──╴ ╭──╴ ╭──╮") || !strings.Contains(out, "ORCHESTRATE THE CHOIR") || !strings.Contains(out, "spent") {
+		t.Fatal("board should show the line logo with the poster info")
 	}
 }

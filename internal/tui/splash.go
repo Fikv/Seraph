@@ -40,7 +40,7 @@ func (m *Model) splashElapsed() time.Duration {
 }
 
 func titleDone() time.Duration {
-	return titleStart + emblemBuild
+	return titleStart + lineBuild
 }
 
 func (m *Model) tagDone() time.Duration {
@@ -150,7 +150,7 @@ func tildeHome(p string) string {
 }
 
 func (m *Model) panel(el time.Duration) []string {
-	out := emblem(el - titleStart)
+	out := logoArt(m.logoStyle, el-titleStart)
 	out = append(out, m.tagAt(el), "")
 	for i, line := range m.panelLines() {
 		if el < m.tagDone()+time.Duration(i)*lineStep {
