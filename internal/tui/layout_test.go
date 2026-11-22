@@ -171,6 +171,7 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.err = strings.Repeat("err ", 40)
 		},
 		"board-project": func(m *Model) { p := m.projects[0]; m.useProject(&p); m.scr = scrBoard },
+		"board-empty":   func(m *Model) { p := m.projects[0]; m.useProject(&p); m.scr = scrBoard; m.project.ID = "nothing-here" },
 		"notes": func(m *Model) {
 			p := m.projects[0]
 			m.useProject(&p)
@@ -187,8 +188,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 		"diff":     func(m *Model) { m.openDiff("dfx001", scrBoard); m.diff.focus = 1 },
 		"diff-ask": func(m *Model) { m.openDiff("dfx001", scrBoard); m.startAsk(false) },
 	}
-	if len(screens) != 22 {
-		t.Fatalf("expected 22 screens under test, got %d", len(screens))
+	if len(screens) != 23 {
+		t.Fatalf("expected 23 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -299,5 +300,25 @@ func TestSpinStarCycles(t *testing.T) {
 	}
 	if spinStar(spinEvery, false) != spinStar(3*spinEvery, true) {
 		t.Fatal("right star should run the sequence backwards")
+	}
+}
+
+func TestWordmark(t *testing.T) {
+	rows := wordmarkRows()
+	for i, r := range rows {
+		if w := ansi.StringWidth(r); w != ansi.StringWidth(rows[0]) {
+			t.Fatalf("row %d is %d wide, row 0 is %d", i, w, ansi.StringWidth(rows[0]))
+		}
+	}
+	m := testModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
+	m.scr = scrBoard
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "╭───╴  ╭───╴  ╭───╮") {
+		t.Fatalf("banner missing on a large board:\n%s", out[:min(len(out), 600)])
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if out := ansi.Strip(m.View()); strings.Contains(out, "╭───╴  ╭───╴") || !strings.Contains(out, "SERAPH") {
+		t.Fatal("small screens should use the compact header")
 	}
 }
