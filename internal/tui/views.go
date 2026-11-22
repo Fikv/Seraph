@@ -19,8 +19,14 @@ func (m *Model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return ""
 	}
+	if m.skipRender && m.lastView != "" {
+		m.skipRender = false
+		return m.lastView
+	}
+	m.skipRender = false
 	m.zoneIDs = m.zoneIDs[:0]
-	return zone.Scan(m.screen())
+	m.lastView = zone.Scan(m.screen())
+	return m.lastView
 }
 
 func (m *Model) screen() string {
@@ -189,6 +195,24 @@ func emptyLane(l lane) string {
 }
 
 func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) string {
+	spin := 0
+	if s.Status == store.StatusWorking || s.Status == store.StatusQueued {
+		spin = (m.frame/3)%len(sparkle) + 1
+	}
+	ck := fmt.Sprintf("%s|%d|%s|%s|%s|%s|%.4f|%s|%s|%s|%d|%t|%t|%v|%d", s.ID, s.UpdatedAt.UnixNano(), s.Status, s.Title, s.LastLine, s.Error,
+		s.Cost, s.Branch, s.Approval, s.Agent, w, selected, m.hover == "card:"+s.ID, laneColor, spin)
+	if box, ok := m.cardMemo[ck]; ok {
+		return m.mark("card:"+s.ID, box)
+	}
+	box := m.renderCard(s, w, selected, laneColor)
+	if m.cardMemo == nil || len(m.cardMemo) > 256 {
+		m.cardMemo = map[string]string{}
+	}
+	m.cardMemo[ck] = box
+	return m.mark("card:"+s.ID, box)
+}
+
+func (m *Model) renderCard(s store.Session, w int, selected bool, laneColor t.RGB) string {
 	inner := max(w-4, 4)
 	l1 := agentGlyph(s.Agent) + " " + sTitle.Render(trunc(s.Title, inner-2))
 
@@ -235,12 +259,12 @@ func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) str
 	case m.hover == "card:"+s.ID:
 		bc = t.Lavender
 	}
-	return m.mark("card:"+s.ID, lipgloss.NewStyle().
+	return lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(bc.Color()).
 		Padding(0, 1).
-		Width(w-2).
-		Render(l1+"\n"+l2+"\n"+l3))
+		Width(w - 2).
+		Render(l1 + "\n" + l2 + "\n" + l3)
 }
 
 func orDefault(s, d string) string {

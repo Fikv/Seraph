@@ -89,6 +89,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	id := m.zoneAt(msg)
 	switch {
 	case msg.Action == tea.MouseActionMotion:
+		if id == m.hover {
+			m.skipRender = m.lastView != ""
+		}
 		m.hover = id
 		return m, nil
 	case msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown:

@@ -88,6 +88,7 @@ func (m *Model) useProject(p *store.Project) {
 	} else {
 		m.setFlash("all projects", false)
 	}
+	m.refreshStats()
 }
 
 func (m *Model) openProjects() {

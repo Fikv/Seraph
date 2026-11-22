@@ -226,6 +226,26 @@ func (m *Manager) Get(id string) (store.Session, bool) {
 	return *s, true
 }
 
+func (m *Manager) LogVersion(id string) int {
+	m.mu.Lock()
+	local := m.localLog[id]
+	cursor := m.logCursor[id]
+	m.mu.Unlock()
+	if !local {
+		evs, last, err := m.st.ReadLogSince(id, cursor)
+		m.mu.Lock()
+		if err == nil && len(evs) > 0 && m.logCursor[id] == cursor {
+			m.logs[id] = append(m.logs[id], evs...)
+			m.logCursor[id] = last
+			m.versions[id]++
+		}
+		m.mu.Unlock()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.versions[id]
+}
+
 func (m *Manager) Log(id string) ([]agent.Event, int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

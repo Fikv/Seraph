@@ -130,6 +130,12 @@ type Model struct {
 	notes          *notesState
 	picker         *modelPicker
 	missions       *missionsState
+	lastView       string
+	skipRender     bool
+	swallowAt      time.Time
+	stats          viewStats
+	nameMemo       map[string]string
+	cardMemo       map[string]string
 	cursorModels   []agent.Model
 	catalogLoading bool
 	catalogErr     string
@@ -175,6 +181,7 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20)}
 	m.loadCurrentProject()
 	m.logoStyle = logoStyleFor(mgr.Store().Setting(LogoStyleSetting))
+	defer m.refreshStats()
 	if !opt.AgentSet {
 		if a := mgr.Store().Setting(DefaultAgentSetting); a == "claude" || a == "cursor" {
 			m.opt.Agent = a
@@ -286,6 +293,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mgr.SetDefaults(m.defaults())
 			m.lastRefresh = time.Now()
 		}
+		if time.Since(m.stats.at) > time.Second {
+			m.refreshStats()
+		}
 		if m.scr == scrDetail {
 			m.refreshDetail(false)
 		}
@@ -295,6 +305,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case busMsg:
 		m.mgr.Refresh()
 		m.lastRefresh = time.Now()
+		m.refreshStats()
 		return m, waitBus(m.opt.Updates)
 	case catalogMsg:
 		m.catalogLoading = false
@@ -302,6 +313,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.catalogErr = msg.err.Error()
 		} else {
 			m.cursorModels, m.catalogErr = msg.models, ""
+			m.nameMemo = nil
 			if m.picker != nil {
 				m.applyModelFilter()
 			}
@@ -328,6 +340,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 	case tea.KeyMsg:
+		if m.mouseGarbage(msg) {
+			m.skipRender = m.lastView != ""
+			return m, nil
+		}
 		if msg.String() == "ctrl+c" {
 			if m.planCancel != nil {
 				m.planCancel()
@@ -555,9 +571,11 @@ func (m *Model) refreshDetail(force bool) {
 		m.scr = scrBoard
 		return
 	}
-	evs, ver := m.mgr.Log(m.openID)
+	ver := m.mgr.LogVersion(m.openID)
 	changed := force || ver != m.vpVersion || m.vpWidth != m.vp.Width
 	if changed {
+		evs, v := m.mgr.Log(m.openID)
+		ver = v
 		atBottom := m.vp.AtBottom() || force
 		m.vp.SetContent(renderTranscript(evs, s.Agent, m.vp.Width))
 		if atBottom {

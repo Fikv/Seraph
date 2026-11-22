@@ -105,6 +105,9 @@ func (m *Model) reloadMissions(force bool) {
 		s.rows = buildTree(nodes)
 	}
 	s.nodeSel = min(s.nodeSel, max(len(s.rows)-1, 0))
+	if force {
+		m.refreshStats()
+	}
 }
 
 func (m *Model) currentMission() (store.Mission, bool) {
@@ -840,17 +843,5 @@ func (m *Model) missionClick(kind, arg string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) activeMissions() (active, waiting int) {
-	all, _ := m.mgr.Missions()
-	for _, ms := range all {
-		if m.project != nil && ms.ProjectID != m.project.ID {
-			continue
-		}
-		if ms.Active() {
-			active++
-		}
-		if ms.State == store.MissionWaiting || ms.State == store.MissionBlocked {
-			waiting++
-		}
-	}
-	return
+	return m.stats.activeMissions, m.stats.waitingMissions
 }
