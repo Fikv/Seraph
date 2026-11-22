@@ -45,7 +45,8 @@ Usage:
   seraph redis up|down|status    optional Redis for live sync and caching
   seraph db                      show the SQLite database
   seraph doctor                  check that agents are installed
-  seraph logo [cols] [rows]      print the emblem
+  seraph logo [cols] [rows]      print the angel emblem
+  seraph logo style [line|orbit] choose the board/splash logo
 
 Flags (seraph and seraph run):
   -a, -agent string   claude | cursor (default "claude", env SERAPH_AGENT)
@@ -353,6 +354,29 @@ func cmdDoctor() error {
 }
 
 func cmdLogo(args []string) error {
+	if len(args) > 0 && args[0] == "style" {
+		st, err := store.Open()
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		if len(args) == 1 {
+			cur := st.Setting(tui.LogoStyleSetting)
+			if cur == "" {
+				cur = tui.LogoLine
+			}
+			fmt.Println("logo style: " + cur + "  (line | orbit)")
+			return nil
+		}
+		if args[1] != tui.LogoLine && args[1] != tui.LogoOrbit {
+			return errors.New("usage: seraph logo style [line|orbit]")
+		}
+		if err := st.SetSetting(tui.LogoStyleSetting, args[1]); err != nil {
+			return err
+		}
+		fmt.Println(t.FG(t.Gold).Render("✦ ") + "logo style set to " + args[1])
+		return nil
+	}
 	cols, rows := 64, 32
 	if len(args) > 0 {
 		n, err := strconv.Atoi(args[0])

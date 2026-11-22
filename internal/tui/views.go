@@ -100,7 +100,7 @@ func (m *Model) boardView() string {
 	bodyH := max(m.h-5, 4)
 	if m.cornerEmblem() {
 		top = m.emblemHeader()
-		bodyH = max(m.h-9, 4)
+		bodyH = max(m.h-m.logoLines()-4, 4)
 	}
 	ls := m.lanes()
 

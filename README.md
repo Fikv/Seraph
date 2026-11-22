@@ -127,6 +127,13 @@ seraph mcp add <name> -e API_KEY=... -no-cursor
 seraph mcp list | test <name> | rm <name>
 ```
 
+## Logo
+
+The board and the start screen show the SERAPH mark with a glitch build-in, spinning stars and a
+comet running along the line under it. `seraph logo style orbit` switches to the alternative mark
+(slanted blade letters inside an orbit ring); `seraph logo style line` switches back.
+`SERAPH_LOGO=line|orbit` overrides the setting for one run.
+
 ## Storage
 
 Everything Seraph knows lives in **SQLite** at `~/.seraph/seraph.db` (WAL mode, file mode 0600):

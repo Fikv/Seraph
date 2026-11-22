@@ -74,6 +74,7 @@ type Model struct {
 	splashStart time.Time
 	splashDone  bool
 	emblemStart time.Time
+	logoStyle   string
 	lastRefresh time.Time
 	versions    map[string]string
 
@@ -162,6 +163,7 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 
 	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20)}
 	m.loadCurrentProject()
+	m.logoStyle = logoStyleFor(mgr.Store().Setting(LogoStyleSetting))
 	m.repoText = m.repoLabel()
 	if opt.SkipSplash {
 		m.scr = scrBoard
