@@ -29,6 +29,11 @@ func (Claude) Args(s Spec) []string {
 		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", testAllowedTools())
 	case ApprovalCheck:
 		args = append(args, "--allowedTools", checkAllowedTools())
+	case ApprovalConfirm:
+		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", testAllowedTools())
+		if len(s.Permit) > 0 {
+			args = append(args, "--mcp-config", permitConfig(s.Permit), "--permission-prompt-tool", PermitTool)
+		}
 	default:
 		args = append(args, "--permission-mode", "acceptEdits")
 	}

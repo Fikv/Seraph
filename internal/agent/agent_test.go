@@ -102,3 +102,19 @@ func TestRateLimitAndModels(t *testing.T) {
 		t.Fatal("window labels")
 	}
 }
+
+func TestConfirmModeWiresPermitTool(t *testing.T) {
+	args := Claude{}.Args(Spec{Prompt: "p", Approval: ApprovalConfirm, Permit: []string{"/bin/seraph", "permit", "abc"}})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--permission-prompt-tool " + PermitTool, `"command":"/bin/seraph"`, `"args":["permit","abc"]`, "acceptEdits", "Bash(go test:*)"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args lack %q: %s", want, joined)
+		}
+	}
+	if args[len(args)-1] != "p" || args[len(args)-2] != "--" {
+		t.Fatal("prompt must stay last")
+	}
+	if strings.Contains(strings.Join(Cursor{}.Args(Spec{Prompt: "p", Approval: ApprovalConfirm}), " "), "--force") {
+		t.Fatal("cursor confirm must not force")
+	}
+}

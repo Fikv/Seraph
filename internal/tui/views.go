@@ -25,7 +25,11 @@ func (m *Model) View() string {
 	}
 	m.skipRender = false
 	m.zoneIDs = m.zoneIDs[:0]
-	m.lastView = zone.Scan(m.screen())
+	screen := m.screen()
+	if p, ok := m.currentPermission(); ok {
+		screen = m.overlay(m.permissionView(p))
+	}
+	m.lastView = zone.Scan(screen)
 	return m.lastView
 }
 
@@ -201,7 +205,7 @@ func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) str
 	if s.Status == store.StatusWorking || s.Status == store.StatusQueued {
 		spin = (m.frame/3)%len(sparkle) + 1
 	}
-	ck := fmt.Sprintf("%s|%s|%d|%s|%s|%s|%s|%.4f|%s|%s|%s|%d|%t|%t|%v|%d", m.stats.badges[s.ID], s.ID, s.UpdatedAt.UnixNano(), s.Status, s.Title, s.LastLine, s.Error,
+	ck := fmt.Sprintf("%s|%s|%s|%d|%s|%s|%s|%s|%.4f|%s|%s|%s|%d|%t|%t|%v|%d", m.stats.waitingFor[s.ID], m.stats.badges[s.ID], s.ID, s.UpdatedAt.UnixNano(), s.Status, s.Title, s.LastLine, s.Error,
 		s.Cost, s.Branch, s.Approval, s.Agent, w, selected, m.hover == "card:"+s.ID, laneColor, spin)
 	if box, ok := m.cardMemo[ck]; ok {
 		return m.mark("card:"+s.ID, box)
@@ -219,20 +223,22 @@ func (m *Model) renderCard(s store.Session, w int, selected bool, laneColor t.RG
 	l1 := agentGlyph(s.Agent) + " " + sTitle.Render(trunc(s.Title, inner-2))
 
 	var l2 string
-	switch s.Status {
-	case store.StatusWorking, store.StatusQueued:
+	switch {
+	case m.stats.waitingFor[s.ID] != "":
+		l2 = sGoldB.Render("⚿ ") + sGold.Render(trunc("asks: "+m.stats.waitingFor[s.ID], inner-2))
+	case s.Status == store.StatusWorking || s.Status == store.StatusQueued:
 		line := s.LastLine
 		if line == "" {
 			line = "warming its wings…"
 		}
 		l2 = sCyan.Render(sparkle[(m.frame/3)%len(sparkle)]) + " " + sDim.Render(trunc(line, inner-2))
-	case store.StatusFailed:
+	case s.Status == store.StatusFailed:
 		line := s.Error
 		if line == "" {
 			line = s.LastLine
 		}
 		l2 = sRose.Render("✗ " + trunc(line, inner-2))
-	case store.StatusStopped:
+	case s.Status == store.StatusStopped:
 		l2 = sLavender.Render("◇ ") + sDim.Render(trunc(orDefault(s.LastLine, "paused"), inner-2))
 	default:
 		l2 = sGold.Render("✦ ") + sIvory.Render(trunc(orDefault(s.LastLine, "complete"), inner-2))
@@ -250,8 +256,8 @@ func (m *Model) renderCard(s store.Session, w int, selected bool, laneColor t.RG
 	if s.Cost > 0 {
 		meta += " · " + money(s.Cost)
 	}
-	if s.Approval == string(agent.ApprovalYolo) {
-		meta += " · yolo"
+	if s.Approval == string(agent.ApprovalYolo) || s.Approval == string(agent.ApprovalConfirm) {
+		meta += " · " + s.Approval
 	}
 	l3 := sFaint.Render(trunc(meta, inner))
 
@@ -297,15 +303,29 @@ func (m *Model) detailView() string {
 		info3 = sRose.Render("✗ " + trunc(s.Error, m.w-3))
 	}
 
-	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), m.chip("ctrl+g", "ctrl+g", "diff"), key("↑↓ wheel", "scroll"),
-		m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
+	selLabel := "select text"
+	if m.selectMode {
+		selLabel = "mouse back"
+	}
+	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), m.chip("ctrl+t", "ctrl+t", selLabel), m.chip("ctrl+o", "ctrl+o", "copy answer"),
+		m.chip("ctrl+g", "ctrl+g", "diff"), key("↑↓ wheel", "scroll"), m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
+	if m.selectMode {
+		keys = hints(m.w, sGold.Render("✂ SELECT MODE"), sDim.Render("drag to select, ctrl+shift+c copies"), m.chip("ctrl+t", "ctrl+t", "mouse back"))
+	}
+	divider := rule(m.w)
+	switch {
+	case m.stats.waitingFor[s.ID] != "":
+		divider = sGoldB.Render("⚿ waiting for your approval: ") + sIvory.Render(trunc(m.stats.waitingFor[s.ID], max(m.w-30, 5)))
+	case (s.Status == store.StatusWorking || s.Status == store.StatusQueued) && m.mgr.Active(s.ID):
+		divider = workingBar(m.w, time.Since(spinEpoch))
+	}
 	return strings.Join([]string{
 		m.header(),
 		lipgloss.NewStyle().MaxWidth(m.w).Render(info1),
 		lipgloss.NewStyle().MaxWidth(m.w).Render(where),
 		info3,
 		m.vp.View(),
-		rule(m.w),
+		divider,
 		m.fi.View(),
 		keys,
 	}, "\n")

@@ -219,6 +219,24 @@ var migrations = []string{
 	);
 	CREATE INDEX releases_target ON releases(kind, target_id, created_at DESC);
 	ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT '';`,
+	`CREATE TABLE permissions (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		tool TEXT NOT NULL,
+		input TEXT NOT NULL DEFAULT '{}',
+		status TEXT NOT NULL,
+		message TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		decided_at INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX permissions_pending ON permissions(status, created_at);
+	CREATE TABLE permit_rules (
+		session_id TEXT NOT NULL,
+		tool TEXT NOT NULL,
+		prefix TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		PRIMARY KEY (session_id, tool, prefix)
+	);`,
 }
 
 func Open() (*Store, error) {

@@ -535,6 +535,11 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 	if cfg, err := mcp.Load(m.st); err == nil {
 		spec.ApproveMCPs = cfg.AnyCursor()
 	}
+	if spec.Approval == agent.ApprovalConfirm {
+		if exe, err := os.Executable(); err == nil {
+			spec.Permit = []string{exe, "permit", id}
+		}
+	}
 
 	m.wg.Add(1)
 	go func() {
@@ -580,6 +585,7 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		snapshot := *s
 		m.mu.Unlock()
 		_ = m.st.Save(snapshot)
+		_ = m.st.ExpirePermissions(id)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			m.record(id, agent.Event{Kind: agent.KindError, Text: err.Error(), Time: time.Now()})
 		}
@@ -790,4 +796,46 @@ func (m *Manager) Limits(agentName string) (agent.Limits, bool) {
 		return agent.Limits{}, false
 	}
 	return l, true
+}
+
+func (m *Manager) PendingPermissions() []store.Permission {
+	ps, err := m.st.PendingPermissions()
+	if err != nil {
+		return nil
+	}
+	var out []store.Permission
+	for _, p := range ps {
+		if s, ok := m.Get(p.SessionID); ok && (m.Active(p.SessionID) || s.Status == store.StatusWorking) {
+			out = append(out, p)
+			continue
+		}
+		_ = m.st.ExpirePermissions(p.SessionID)
+	}
+	return out
+}
+
+func (m *Manager) DecidePermission(id string, allow, always bool, message string) error {
+	p, ok, err := m.st.Permission(id)
+	if err != nil || !ok {
+		return fmt.Errorf("no permission request %s", id)
+	}
+	if allow && always {
+		prefix := ""
+		if p.Tool == "Bash" {
+			prefix = store.CommandPrefix(p.Command())
+		}
+		if err := m.st.AddPermitRule(p.SessionID, p.Tool, prefix); err != nil {
+			return err
+		}
+	}
+	status := store.PermDeny
+	if allow {
+		status = store.PermAllow
+	}
+	decided, err := m.st.DecidePermission(id, status, message)
+	if err == nil && !decided {
+		return errors.New("this request was already answered or expired")
+	}
+	m.publish(p.SessionID, true)
+	return err
 }
