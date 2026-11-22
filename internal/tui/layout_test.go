@@ -314,7 +314,7 @@ func TestEmblem(t *testing.T) {
 		}
 	}
 	plain := ansi.Strip(strings.Join(built, "\n"))
-	if !strings.Contains(plain, "┏━━╸ ┏━━╸ ┏━━┓ ┏━━┓ ┏━━┓ ╻  ╻") || !strings.Contains(plain, "─") {
+	if !strings.Contains(plain, "┏━╸ ┏━╸ ┏━┓ ┏━┓ ┏━┓ ╻ ╻") || !strings.Contains(plain, "─") {
 		t.Fatalf("emblem word or orbit missing:\n%s", plain)
 	}
 	if early := ansi.Strip(strings.Join(emblem(-time.Second), "")); strings.TrimSpace(early) != "" {
@@ -336,11 +336,11 @@ func TestEmblem(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
 	m.scr = scrBoard
 	m.emblemStart = time.Now().Add(-5 * time.Second)
-	if out := ansi.Strip(m.View()); !strings.Contains(out, "┏━━╸ ┏━━╸") || !strings.Contains(out, "ORCHESTRATE THE CHOIR") {
+	if out := ansi.Strip(m.View()); !strings.Contains(out, "┏━╸ ┏━╸") || !strings.Contains(out, "ORCHESTRATE THE CHOIR") {
 		t.Fatal("board should show the corner emblem on a large terminal")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if out := ansi.Strip(m.View()); strings.Contains(out, "┏━━╸ ┏━━╸") || !strings.Contains(out, "SERAPH") {
+	if out := ansi.Strip(m.View()); strings.Contains(out, "┏━╸ ┏━╸") || !strings.Contains(out, "SERAPH") {
 		t.Fatal("small terminals should use the compact header")
 	}
 }
@@ -362,11 +362,11 @@ func TestLineMark(t *testing.T) {
 	if strings.TrimSpace(ansi.Strip(strings.Join(lineMark(-time.Second), ""))) != "" {
 		t.Fatal("before the build everything should be blank")
 	}
-	if logoStyleFor("") != LogoLine || logoStyleFor(LogoOrbit) != LogoOrbit {
-		t.Fatal("default must be line, setting orbit selects the backup")
+	if logoStyleFor("") != LogoOrbit || logoStyleFor(LogoLine) != LogoLine {
+		t.Fatal("default must be orbit, setting line selects the alternative")
 	}
-	t.Setenv("SERAPH_LOGO", LogoOrbit)
-	if logoStyleFor("") != LogoOrbit {
+	t.Setenv("SERAPH_LOGO", LogoLine)
+	if logoStyleFor("") != LogoLine {
 		t.Fatal("SERAPH_LOGO must override the setting")
 	}
 

@@ -363,7 +363,7 @@ func cmdLogo(args []string) error {
 		if len(args) == 1 {
 			cur := st.Setting(tui.LogoStyleSetting)
 			if cur == "" {
-				cur = tui.LogoLine
+				cur = tui.LogoOrbit
 			}
 			fmt.Println("logo style: " + cur + "  (line | orbit)")
 			return nil
