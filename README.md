@@ -129,8 +129,8 @@ seraph mcp list | test <name> | rm <name>
 
 ## Logo
 
-The board and the start screen show the SERAPH mark: slanted blade letters inside an orbit ring,
-built in with a pixel glitch, with a spinning star circling the ring. `seraph logo style line`
+The board and the start screen show a compact SERAPH mark (21×3): the name with blade strokes
+inside an orbit ring, built in with a pixel glitch, with a spinning star circling the ring. `seraph logo style line`
 switches to the alternative mark (thin rounded letters with a comet running along a line);
 `seraph logo style orbit` switches back. `SERAPH_LOGO=orbit|line` overrides the setting for one run.
 
