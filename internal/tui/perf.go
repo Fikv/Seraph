@@ -17,6 +17,7 @@ type viewStats struct {
 	hasLimits       bool
 	activeMissions  int
 	waitingMissions int
+	badges          map[string]string
 }
 
 func (m *Model) refreshStats() {
@@ -35,7 +36,38 @@ func (m *Model) refreshStats() {
 			}
 		}
 	}
+	s.badges = map[string]string{}
+	if rs, err := m.mgr.Store().Releases(""); err == nil {
+		latest := map[string]store.Release{}
+		for _, r := range rs {
+			latest[r.Kind+":"+r.TargetID] = r
+		}
+		for k, r := range latest {
+			if b := releaseBadge(r, true); b != "" {
+				s.badges[strings.TrimPrefix(strings.TrimPrefix(k, store.TargetSession+":"), store.TargetMission+":")] = b
+			}
+		}
+	}
 	m.stats = s
+}
+
+func (m *Model) followCurrentProject() {
+	id := m.mgr.Store().Setting(store.CurrentProjectSetting)
+	cur := ""
+	if m.project != nil {
+		cur = m.project.ID
+	}
+	if id == cur {
+		return
+	}
+	if id == "" {
+		m.useProject(nil)
+		return
+	}
+	if p, ok, _ := m.mgr.Store().Project(id); ok {
+		m.useProject(&p)
+		m.setFlash("switched to project "+p.Name+" (changed in another terminal)", false)
+	}
 }
 
 var (

@@ -204,11 +204,18 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	repo, projectID := orch.RunTarget(mgr.Store(), repo)
+	if projectID != "" && repo != "" && !strings.HasPrefix(dir+"/", repo+"/") {
+		dir = repo
+	}
 	if c.noWorktree {
 		repo = ""
 	}
+	if p, ok, _ := mgr.Store().Project(projectID); ok {
+		fmt.Println(t.FG(t.Lavender).Render("◈ "+p.Name) + t.FG(t.Dim).Render(" · "+orDefault(repo, dir)))
+	}
 	id, err := mgr.Spawn(orch.SpawnOpts{
-		Task: task, Agent: c.agent, Model: c.model, Approval: c.approval(), Repo: repo, Dir: dir,
+		Task: task, Agent: c.agent, Model: c.model, Approval: c.approval(), Repo: repo, Dir: dir, ProjectID: projectID,
 	})
 	if err != nil {
 		return err

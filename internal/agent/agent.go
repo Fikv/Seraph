@@ -49,6 +49,7 @@ const (
 	ApprovalReadOnly Approval = "readonly"
 	ApprovalAsk      Approval = "ask"
 	ApprovalTest     Approval = "test"
+	ApprovalCheck    Approval = "check"
 )
 
 type Spec struct {
@@ -235,11 +236,23 @@ var TestCommands = []string{
 	"go test", "go vet", "go build", "npm test", "npm run test", "npm run build", "npm run lint", "pnpm test", "pnpm run test",
 	"yarn test", "npx vitest", "npx jest", "npx tsc", "pytest", "python -m pytest", "python3 -m pytest", "cargo test",
 	"cargo build", "cargo check", "make test", "make check", "mvn test", "gradle test", "./gradlew test", "dotnet test",
-	"bundle exec rspec", "php artisan test", "git status", "git diff", "git log",
+	"bundle exec rspec", "php artisan test", "git status", "git diff", "git log", "git show",
+	"go version", "go list", "go run", "gofmt -l", "gofmt -d", "node --version", "npm ls", "npm run typecheck",
+	"npm run check", "pnpm run build", "pnpm lint", "pnpm run lint", "yarn build", "yarn lint", "npx eslint",
+	"npx prettier --check", "npx tsc --noEmit", "tsc --noEmit", "ruff check", "ruff format --check", "mypy",
+	"python -m mypy", "cargo clippy", "cargo fmt --check", "make lint", "make build",
 }
 
 func testAllowedTools() string {
-	tools := []string{"Read", "Grep", "Glob", "Edit", "Write", "MultiEdit"}
+	return allowedWith("Read", "Grep", "Glob", "Edit", "Write", "MultiEdit")
+}
+
+func checkAllowedTools() string {
+	return allowedWith("Read", "Grep", "Glob")
+}
+
+func allowedWith(base ...string) string {
+	tools := append([]string(nil), base...)
 	for _, c := range TestCommands {
 		tools = append(tools, "Bash("+c+":*)")
 	}

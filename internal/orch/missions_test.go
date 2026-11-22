@@ -42,6 +42,11 @@ func (d teamDriver) Args(s agent.Spec) []string {
 	sys, p := s.SystemPrompt, s.Prompt
 	var reply, shell string
 	switch {
+	case strings.Contains(sys, "Validator"):
+		if os.Getenv("SERAPH_TEST_VALIDATOR_WRITES") == "1" {
+			shell = "echo oops > validator-was-here.txt\n"
+		}
+		reply = "## Requests\n| ask | done |\nVERDICT: " + os.Getenv("SERAPH_TEST_VERDICT")
 	case strings.Contains(sys, "Product Owner doing acceptance"):
 		reply = "## Acceptance criteria\n| AC1 | yes | a/ and b/ |\nVERDICT: ACCEPT"
 	case strings.Contains(sys, "Product Owner"):

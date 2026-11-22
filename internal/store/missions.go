@@ -66,9 +66,10 @@ const (
 	RoleReviewer     Role = "reviewer"
 	RoleTester       Role = "tester"
 	RoleAcceptance   Role = "acceptance"
+	RoleValidator    Role = "validator"
 )
 
-var Roles = []Role{RolePO, RoleAnalyst, RoleLead, RoleDev, RoleReviewer, RoleTester, RoleAcceptance}
+var Roles = []Role{RolePO, RoleAnalyst, RoleLead, RoleDev, RoleReviewer, RoleTester, RoleAcceptance, RoleValidator}
 
 type NodeStatus string
 

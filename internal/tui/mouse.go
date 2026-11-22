@@ -187,6 +187,12 @@ func (m *Model) wheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m.handleKey(keyMsg(dir))
+	case scrRelease:
+		if m.release != nil && m.release.report {
+			var cmd tea.Cmd
+			m.release.vp, cmd = m.release.vp.Update(msg)
+			return m, cmd
+		}
 	case scrBoard, scrPlanReview, scrMCP, scrProjects, scrTodos:
 		return m.handleKey(keyMsg(dir))
 	}
@@ -243,6 +249,7 @@ func (m *Model) menuItems() [][]menuItem {
 			{"v", "V", "diff", hasSel},
 			{"t", "T", "todo board", m.project != nil},
 			{"M", "M", "missions", true},
+			{"w", "W", "release", hasSel},
 			{"c", "C", "MCP servers", true},
 			{"s", "S", "start screen", true},
 			{"esc", "ESC", "close", true},

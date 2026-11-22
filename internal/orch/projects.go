@@ -231,6 +231,7 @@ func (m *Manager) StartScheduler(d Defaults) {
 
 func (m *Manager) ScheduleOnce() []error {
 	m.tickMissions()
+	m.tickReleases()
 	m.sched.mu.Lock()
 	d := m.sched.defaults
 	m.sched.mu.Unlock()

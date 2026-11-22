@@ -357,7 +357,12 @@ func (m *Model) gatePanel(ms store.Mission, w int) []string {
 		out = append(out, sRose.Render(trunc("☩ "+ms.Error, w)))
 		out = append(out, hints(w, m.chip("r", "r", "retry"), m.chip("enter", "⏎", "open worker"), m.chip("x", "x", "cancel")))
 	case store.MissionDone:
-		out = append(out, sGold.Render(trunc("✦ accepted · merge when ready: git merge "+ms.Branch+" (into "+ms.Base+")", w)))
+		badge := m.stats.badges[ms.ID]
+		if badge == "" {
+			badge = "not released yet"
+		}
+		out = append(out, sGold.Render(trunc("✦ accepted · "+badge, w)))
+		out = append(out, hints(w, m.chip("w", "w", "release: validate → merge into "+ms.Base+" → push")))
 	case store.MissionCancelled:
 		out = append(out, sFaint.Render("cancelled · branch "+ms.Branch+" kept"))
 	default:
@@ -503,8 +508,12 @@ func (m *Model) rolesView() string {
 			sFaint.Render("  "+string(cfg.Approval)+"  ") + src
 		rows = append(rows, m.mark(fmt.Sprintf("role:%d", i), ansi.Truncate(line, w, "…")))
 	}
-	body := sDim.Render("which model plays each role (default = your board model)") + "\n\n" + strings.Join(rows, "\n") + "\n\n" +
-		sFaint.Render(trunc("read-only: PO, analyst, lead, reviewer, acceptance · test mode: edits + test/build commands only", w)) + "\n\n" +
+	rows = fitLines(rows, s.roleSel, max(m.h-12, 3))
+	note := ""
+	if m.h >= 26 {
+		note = sFaint.Render(trunc("read-only: PO, analyst, lead, reviewer, acceptance · test: edits + test/build commands · check: validator, reads + test/build commands", w)) + "\n\n"
+	}
+	body := sDim.Render("which model plays each role (default = your board model)") + "\n\n" + strings.Join(rows, "\n") + "\n\n" + note +
 		hints(w, m.chip("enter", "⏎", "pick model"), m.chip("backspace", "⌫", "reset"), key("↑↓", "move"), m.chip("esc", "esc", "close"))
 	return modal("♖ TEAM ROLES", body, m.modalWidth())
 }
@@ -633,6 +642,14 @@ func (m *Model) missionsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.ta.Focus()
 	case "R":
 		s.mode, s.roleSel = mmRoles, 0
+	case "w":
+		if hasMission {
+			if ms.State != store.MissionDone {
+				m.setFlash("accept the mission first (the acceptance gate), then release it", true)
+				return m, nil
+			}
+			return m, m.openRelease(store.TargetMission, ms.ID, scrMissions)
+		}
 	case "a":
 		if hasMission {
 			var n *store.Node

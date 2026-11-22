@@ -57,6 +57,8 @@ func (m *Model) screen() string {
 		return m.overlay(m.modelPickerView())
 	case scrMissions:
 		return m.missionsView()
+	case scrRelease:
+		return m.releaseView()
 	case scrDiff:
 		return m.diffView()
 	case scrTodos:
@@ -199,7 +201,7 @@ func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) str
 	if s.Status == store.StatusWorking || s.Status == store.StatusQueued {
 		spin = (m.frame/3)%len(sparkle) + 1
 	}
-	ck := fmt.Sprintf("%s|%d|%s|%s|%s|%s|%.4f|%s|%s|%s|%d|%t|%t|%v|%d", s.ID, s.UpdatedAt.UnixNano(), s.Status, s.Title, s.LastLine, s.Error,
+	ck := fmt.Sprintf("%s|%s|%d|%s|%s|%s|%s|%.4f|%s|%s|%s|%d|%t|%t|%v|%d", m.stats.badges[s.ID], s.ID, s.UpdatedAt.UnixNano(), s.Status, s.Title, s.LastLine, s.Error,
 		s.Cost, s.Branch, s.Approval, s.Agent, w, selected, m.hover == "card:"+s.ID, laneColor, spin)
 	if box, ok := m.cardMemo[ck]; ok {
 		return m.mark("card:"+s.ID, box)
@@ -237,6 +239,9 @@ func (m *Model) renderCard(s store.Session, w int, selected bool, laneColor t.RG
 	}
 
 	meta := s.ID
+	if b := m.stats.badges[s.ID]; b != "" {
+		meta += " · " + b
+	}
 	if s.Branch != "" {
 		meta += " · " + s.Branch
 	} else {

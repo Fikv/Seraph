@@ -41,6 +41,7 @@ const (
 	scrDiff
 	scrModels
 	scrMissions
+	scrRelease
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -130,6 +131,7 @@ type Model struct {
 	notes          *notesState
 	picker         *modelPicker
 	missions       *missionsState
+	release        *releaseState
 	lastView       string
 	skipRender     bool
 	swallowAt      time.Time
@@ -295,6 +297,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if time.Since(m.stats.at) > time.Second {
 			m.refreshStats()
+			m.followCurrentProject()
 		}
 		if m.scr == scrDetail {
 			m.refreshDetail(false)
@@ -368,7 +371,7 @@ func (m *Model) modalWidth() int { return min(max(m.w-6, 30), 96) }
 func (m *Model) lanes() [laneCount][]store.Session {
 	var out [laneCount][]store.Session
 	for _, s := range m.mgr.Sessions() {
-		if (m.project != nil && s.ProjectID != m.project.ID) || s.MissionID != "" {
+		if (m.project != nil && s.ProjectID != m.project.ID) || s.MissionID != "" || s.Role != "" {
 			continue
 		}
 		l := laneOf(s)
@@ -438,6 +441,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.modelsKey(k)
 	case scrMissions:
 		return m.missionsKey(k)
+	case scrRelease:
+		return m.releaseKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -523,6 +528,10 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		return m, m.openModelPicker(scrBoard, m.setDefaultModel)
 	case "M":
 		return m, m.openMissions("")
+	case "w":
+		if s, ok := m.selected(); ok {
+			return m, m.openRelease(store.TargetSession, s.ID, scrBoard)
+		}
 	case "y":
 		m.toggleApproval()
 	case "x":
