@@ -72,6 +72,11 @@ func testModel(t *testing.T) *Model {
 		{Name: "beta", Transport: "http", URL: "https://example.com/mcp", Headers: map[string]string{"Authorization": "x"}, Claude: true},
 		{Name: "gamma-with-a-really-long-name-that-overflows", Transport: "stdio", Command: "uvx", Status: "error", Error: strings.Repeat("traceback line\t\r", 30)},
 	}}}
+	m.mcp.ext = []mcp.External{
+		{Name: "penpot", Targets: []string{"claude"}, Scope: "user", Server: mcp.Server{Name: "penpot", Transport: "http", URL: "http://localhost:9001/mcp/stream?userToken=SECRETTOKEN"}},
+		{Name: "shared-" + strings.Repeat("long", 10), Targets: []string{"claude", "cursor"}, Scope: "user", Server: mcp.Server{Name: "shared", Transport: "stdio", Command: "npx", Args: []string{"-y", "shared"}, Env: map[string]string{"API_KEY": "x"}}},
+		{Name: "medusa", Targets: []string{"claude"}, Scope: "local", Dir: "/home/u/projekty/" + strings.Repeat("deep/", 10), Server: mcp.Server{Name: "medusa", Transport: "sse", URL: "https://x/sse"}},
+	}
 	entry := mcp.Entry{Name: "io.github.acme/" + strings.Repeat("server", 10), Title: "Acme", Version: "1.0.0", Description: strings.Repeat("a registry description ", 15)}
 	entry.Packages = []mcp.Package{{RegistryType: "npm", Identifier: "@acme/x", Version: "1.0.0"}}
 	for i := 0; i < 9; i++ {
@@ -147,6 +152,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 		"menu":          func(m *Model) { m.scr = scrMenu },
 		"mcp-installed": func(m *Model) { m.scr = scrMCP; m.mcp.tab = 0 },
 		"mcp-browse":    func(m *Model) { m.scr = scrMCP; m.mcp.tab = 1; m.mcp.resSel = 7 },
+		"mcp-external":  func(m *Model) { m.scr = scrMCP; m.mcp.tab = 0; m.mcp.sel = 3 },
+		"mcp-ext-local": func(m *Model) { m.scr = scrMCP; m.mcp.tab = 0; m.mcp.sel = 5 },
 		"mcp-form": func(m *Model) {
 			m.scr = scrMCP
 			m.mcp.tab = 1
@@ -242,8 +249,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
 		},
 	}
-	if len(screens) != 43 {
-		t.Fatalf("expected 43 screens under test, got %d", len(screens))
+	if len(screens) != 45 {
+		t.Fatalf("expected 45 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -770,5 +777,28 @@ func TestChatViewToggleSticks(t *testing.T) {
 	m.vp.GotoTop()
 	if m.chatView || m.mgr.Store().Setting(TranscriptViewSetting) != "full" || !strings.Contains(ansi.Strip(m.vp.View()), "Bash") {
 		t.Fatal("tab brings the full transcript back")
+	}
+}
+
+func TestMCPExternalRows(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h, m.scr = 150, 44, scrMCP
+	m.mcp.tab, m.mcp.sel = 0, 0
+	for i := 0; i < 3; i++ {
+		m.handleKey(keyMsg("down"))
+	}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"ADDED OUTSIDE SERAPH · 3", "penpot", "Claude Code (user scope)", "userToken=••••", "import into Seraph"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("mcp view lacks %q", want)
+		}
+	}
+	if strings.Contains(v, "SECRETTOKEN") {
+		t.Fatal("tokens must never be shown")
+	}
+	m.mcp.sel = 5
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "do not see it") {
+		t.Error("local-scope servers must warn that workers miss them")
 	}
 }

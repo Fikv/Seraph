@@ -29,6 +29,7 @@ type mcpState struct {
 	resSel    int
 	loading   bool
 	busy      map[string]string
+	extProbe  map[string]mcp.Server
 	removing  string
 	form      *mcpForm
 }
@@ -119,7 +120,7 @@ func runCmd(s mcp.Server, action string) tea.Cmd {
 		case "install":
 			mcp.Check(ctx, &s)
 			err = mcp.Apply(ctx, s)
-		case "test":
+		case "test", "probe-ext":
 			mcp.Check(ctx, &s)
 		case "apply":
 			err = mcp.Apply(ctx, s)
@@ -160,6 +161,20 @@ func (m *Model) mcpMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 			st.cfg.Delete(msg.server.Name)
 			st.sel = min(st.sel, max(len(st.cfg.Servers)-1, 0))
 			m.setFlash("removed "+msg.server.Name, false)
+		case "probe-ext":
+			if st.extProbe == nil {
+				st.extProbe = map[string]mcp.Server{}
+			}
+			st.extProbe[msg.server.Name] = msg.server
+			switch msg.server.Status {
+			case mcp.StatusOK:
+				m.setFlash(fmt.Sprintf("%s answers · %d tools", msg.server.Name, len(msg.server.Tools)), false)
+			case mcp.StatusAuth:
+				m.setFlash(msg.server.Name+" needs login (in Claude: /mcp)", true)
+			default:
+				m.setFlash(msg.server.Name+": "+msg.server.Error, true)
+			}
+			return m, nil
 		default:
 			st.cfg.Put(msg.server)
 			switch {
@@ -217,6 +232,7 @@ func (m *Model) mcpSetTab(tab int) tea.Cmd {
 func (m *Model) mcpInstalledKey(key string) (tea.Model, tea.Cmd) {
 	st := m.mcp
 	n := len(st.cfg.Servers)
+	total := n + len(st.ext)
 	if key != "d" {
 		st.removing = ""
 	}
@@ -226,11 +242,14 @@ func (m *Model) mcpInstalledKey(key string) (tea.Model, tea.Cmd) {
 			st.sel--
 		}
 	case "down", "j":
-		if st.sel < n-1 {
+		if st.sel < total-1 {
 			st.sel++
 		}
 	case "/", "b":
 		return m, m.mcpSetTab(1)
+	}
+	if st.sel >= n && st.sel < total {
+		return m.mcpExternalKey(key, st.ext[st.sel-n])
 	}
 	if n == 0 {
 		return m, nil
@@ -478,7 +497,7 @@ func (m *Model) mcpClick(kind, arg string) (tea.Model, tea.Cmd) {
 	case "mcptab":
 		return m, m.mcpSetTab(n)
 	case "mcp":
-		if n < len(st.cfg.Servers) {
+		if n < len(st.cfg.Servers)+len(st.ext) {
 			st.sel = n
 		}
 	case "mcpres":
@@ -590,17 +609,45 @@ func (m *Model) mcpInstalledView(h int) string {
 			targetBadges(s.Claude, s.Cursor) + "  " + statusBadge(s, st.busy[s.Name], m.frame)
 		rows = append(rows, m.mark(fmt.Sprintf("mcp:%d", i), line))
 	}
+	selRow := 0
+	if st.sel < len(st.cfg.Servers) {
+		selRow = st.sel
+	}
 	if len(st.ext) > 0 {
-		rows = append(rows, "", sFaint.Render("  configured outside Seraph"))
-		for _, e := range st.ext {
-			rows = append(rows, sFaint.Render("  ◇ "+trunc(e.Name, listW-16)+" · "+e.Target))
+		rows = append(rows, "", sLavender.Render(fmt.Sprintf("  ◇ ADDED OUTSIDE SERAPH · %d", len(st.ext))))
+		for j, e := range st.ext {
+			i := len(st.cfg.Servers) + j
+			cursor, nameStyle := "  ", sIvory
+			if i == st.sel {
+				cursor, nameStyle = sGold.Render("› "), sGoldB
+				selRow = len(rows)
+			} else if m.hover == fmt.Sprintf("mcp:%d", i) {
+				nameStyle = sLavender
+			}
+			status := sFaint.Render("· untested")
+			if p, ok := st.extProbe[e.Name]; ok {
+				status = statusBadge(p, st.busy[e.Name], m.frame)
+			} else if b := st.busy[e.Name]; b != "" {
+				status = statusBadge(e.Server, b, m.frame)
+			}
+			where := targetBadges(e.Has("claude"), e.Has("cursor"))
+			if e.Scope == "local" {
+				where += sRose.Render(" local")
+			}
+			line := cursor + nameStyle.Render(fmt.Sprintf("%-*s", max(listW-30, 8), trunc(e.Name, max(listW-30, 8)))) + " " + where + "  " + status
+			rows = append(rows, m.mark(fmt.Sprintf("mcp:%d", i), line))
 		}
 	}
+	rows = fitLines(rows, selRow, h)
 	list := lipgloss.NewStyle().Width(listW).Render(strings.Join(rows, "\n"))
 
 	detail := ""
-	if len(st.cfg.Servers) > 0 && detailW > 0 {
+	switch {
+	case detailW == 0:
+	case st.sel < len(st.cfg.Servers) && len(st.cfg.Servers) > 0:
 		detail = m.serverDetail(st.cfg.Servers[st.sel], detailW, h)
+	case st.sel-len(st.cfg.Servers) < len(st.ext):
+		detail = m.externalDetail(st.ext[st.sel-len(st.cfg.Servers)], detailW, h)
 	}
 	return joinPanels(list, detail, detailW, h)
 }
@@ -864,4 +911,84 @@ func (f *mcpForm) fieldLabel() string {
 		return f.opts[f.opt].Fields[f.focus-1].Name
 	}
 	return ""
+}
+
+func (m *Model) mcpExternalKey(key string, e mcp.External) (tea.Model, tea.Cmd) {
+	st := m.mcp
+	if _, busy := st.busy[e.Name]; busy {
+		return m, nil
+	}
+	switch key {
+	case "t", "enter":
+		st.busy[e.Name] = "testing"
+		return m, runCmd(e.Server, "probe-ext")
+	case "i":
+		s := mcp.Import(st.cfg, e)
+		if p, ok := st.extProbe[e.Name]; ok {
+			s.Status, s.Tools, s.Error, s.CheckedAt = p.Status, p.Tools, p.Error, p.CheckedAt
+			st.cfg.Put(s)
+		}
+		m.mcpSave()
+		st.ext = mcp.Externals(st.cfg)
+		for i, x := range st.cfg.Servers {
+			if x.Name == s.Name {
+				st.sel = i
+			}
+		}
+		hint := "press 2 to share it with Cursor"
+		if s.Cursor && !s.Claude {
+			hint = "press 1 to share it with Claude Code"
+		} else if s.Cursor && s.Claude {
+			hint = "it is already in both agents"
+		}
+		if e.Scope == "local" {
+			hint = "press 1 to add it to Claude's user scope so workers see it"
+		}
+		m.setFlash("imported "+s.Name+" into Seraph · "+hint, false)
+	case "d":
+		m.setFlash(e.Name+" lives in "+e.Where()+": import it (i) to manage or remove it from Seraph", true)
+	}
+	return m, nil
+}
+
+func (m *Model) externalDetail(e mcp.External, w, h int) string {
+	wrap := lipgloss.NewStyle().Width(w)
+	row := func(k, v string) string { return sFaint.Render(fmt.Sprintf("%-10s", k)) + v }
+	s := e.Server
+	status := sFaint.Render("untested")
+	if p, ok := m.mcp.extProbe[e.Name]; ok {
+		status = statusBadge(p, m.mcp.busy[e.Name], m.frame)
+		s.Tools, s.Error = p.Tools, p.Error
+	}
+	lines := []string{
+		sGoldB.Render(e.Name) + "  " + sLavender.Render("◇ added outside Seraph") + "  " + status,
+		"",
+		row("found in", wrap.Width(w-10).Render(sIvory.Render(e.Where()))),
+		row("run", sIvory.Render(trunc(s.CommandLine(), w-12))),
+	}
+	var keys []string
+	for k := range s.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		lines = append(lines, row("env", sLavender.Render(k)+sFaint.Render("=")+sDim.Render("••••••")))
+	}
+	for k := range s.Headers {
+		lines = append(lines, row("header", sLavender.Render(k)+sFaint.Render(": ")+sDim.Render("••••••")))
+	}
+	if e.Scope == "local" {
+		lines = append(lines, "", wrap.Render(sRose.Render("⚠ Claude loads local-scope servers only in that exact directory. Seraph workers run in worktrees under ~/.seraph, so they do not see it. Import it and press 1 to add it to Claude's user scope.")))
+	} else {
+		lines = append(lines, "", wrap.Render(sDim.Render("Workers already get it: Claude and Cursor read their own config. Import it to test, document and share it with the other agent from Seraph.")))
+	}
+	if len(s.Tools) > 0 {
+		lines = append(lines, "", sFaint.Render(fmt.Sprintf("tools (%d)", len(s.Tools))))
+		lines = append(lines, wrap.Render(sDim.Render(strings.Join(s.Tools, " · "))))
+	}
+	if s.Error != "" {
+		lines = append(lines, "", wrap.Render(sRose.Render("✗ "+s.Error)))
+	}
+	lines = append(lines, "", hints(w, m.chip("t", "t", "test"), m.chip("i", "i", "import into Seraph")))
+	return lipgloss.NewStyle().Width(w).MaxHeight(h).Render(strings.Join(lines, "\n"))
 }

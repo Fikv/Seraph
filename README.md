@@ -225,6 +225,12 @@ built in with a pixel glitch, with a spinning star circling the ring. `seraph lo
 switches to the alternative mark (thin rounded letters with a comet running along a line);
 `seraph logo style orbit` switches back. `SERAPH_LOGO=orbit|line` overrides the setting for one run.
 
+Servers you added directly in Claude Code (`claude mcp add`) or Cursor show up under
+**◇ added outside Seraph**: `t` tests one, `i` imports it so Seraph manages it and `1`/`2`
+share it with the other agent (`seraph mcp import <name>|all` on the command line).
+Claude's *local* (per-directory) servers are flagged, because workers run in worktrees and
+do not load them until you add them to the user scope. Tokens in URLs are always masked.
+
 ## Storage
 
 Everything Seraph knows lives in **SQLite** at `~/.seraph/seraph.db` (WAL mode, file mode 0600):

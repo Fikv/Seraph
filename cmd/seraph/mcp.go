@@ -17,6 +17,7 @@ const mcpUsage = `usage:
   seraph mcp search [query]
   seraph mcp add <registry-name> [-name n] [-option i] [-e KEY=VALUE]... [-no-claude] [-no-cursor]
   seraph mcp test <name>
+  seraph mcp import <name>|all   (take over servers added in Claude Code or Cursor)
   seraph mcp rm <name>`
 
 type multiFlag []string
@@ -60,6 +61,23 @@ func cmdMCP(args []string) error {
 		}
 		printServer(*s)
 		return nil
+	case "import":
+		if len(args) < 2 {
+			return errors.New(mcpUsage)
+		}
+		n := 0
+		for _, e := range mcp.Externals(cfg) {
+			if args[1] != "all" && e.Name != args[1] {
+				continue
+			}
+			s := mcp.Import(cfg, e)
+			n++
+			fmt.Println(t.FG(t.Gold).Render("✦ imported ") + s.Name + t.FG(t.Dim).Render(" from "+e.Where()))
+		}
+		if n == 0 {
+			return fmt.Errorf("no server %q outside Seraph (see seraph mcp list)", args[1])
+		}
+		return cfg.Save()
 	case "rm", "remove":
 		if len(args) < 2 {
 			return errors.New(mcpUsage)
@@ -88,7 +106,11 @@ func mcpList(cfg *mcp.Config) error {
 		printServer(s)
 	}
 	for _, e := range mcp.Externals(cfg) {
-		fmt.Printf("%s %-24s %s\n", t.FG(t.Faint).Render("◇"), e.Name, t.FG(t.Dim).Render("external · "+e.Target))
+		fmt.Printf("%s %-24s %s\n", t.FG(t.Lavender).Render("◇"), e.Name, t.FG(t.Dim).Render("outside Seraph · "+e.Where()))
+		fmt.Println(t.FG(t.Faint).Render("    " + e.Server.CommandLine()))
+		if !e.ReachesWorkers() {
+			fmt.Println(t.FG(t.Rose).Render("    local scope: Seraph workers (worktrees) do not see it; import it and add it to user scope"))
+		}
 	}
 	return nil
 }
