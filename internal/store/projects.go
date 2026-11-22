@@ -160,6 +160,9 @@ func (s *Store) DeleteProject(id string) error {
 	if _, err := tx.Exec(`UPDATE sessions SET project_id = '', todo_id = '' WHERE project_id = ?`, id); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`UPDATE missions SET project_id = '', todo_id = '' WHERE project_id = ?`, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM projects WHERE id = ?`, id); err != nil {
 		return err
 	}

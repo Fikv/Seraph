@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,14 +54,14 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-func TestDispatchAndSchedule(t *testing.T) {
+func TestWorkerSpawnInProject(t *testing.T) {
 	t.Setenv("SERAPH_HOME", t.TempDir())
 	t.Setenv("GIT_AUTHOR_NAME", "t")
 	t.Setenv("GIT_AUTHOR_EMAIL", "t@t")
 	t.Setenv("GIT_COMMITTER_NAME", "t")
 	t.Setenv("GIT_COMMITTER_EMAIL", "t@t")
 	t.Setenv("SERAPH_TEST_NOTE", "done")
-	agent.Register("fake", fakeDriver{sleep: "0.3"})
+	agent.Register("fake", fakeDriver{sleep: "0.1"})
 	st, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -73,74 +72,65 @@ func TestDispatchAndSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close()
-
-	notes := t.TempDir()
-	repo := gitRepo(t)
-	p := store.Project{ID: "p1", Name: "Demo", NotesDir: notes, DefaultAgent: "fake", MaxParallel: 1, Repos: []string{repo}}
-	if err := st.SaveProject(p); err != nil {
+	notes, repo := t.TempDir(), gitRepo(t)
+	st.SaveProject(store.Project{ID: "p1", Name: "Demo", NotesDir: notes, Repos: []string{repo}})
+	id, err := m.Spawn(SpawnOpts{Task: "quick fix", Agent: "fake", Approval: agent.ApprovalSafe, Repo: repo, ProjectID: "p1"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	for i, title := range []string{"first", "second", "third"} {
-		st.SaveTodo(store.Todo{ID: "t" + string(rune('1'+i)), ProjectID: "p1", Title: title, Status: store.TodoQueued, Priority: 3 - i})
-	}
-	d := Defaults{Agent: "fake", Approval: agent.ApprovalSafe}
-
-	m.SetDefaults(d)
-	m.ScheduleOnce()
-	t1, _, _ := st.Todo("t1")
-	t2, _, _ := st.Todo("t2")
-	if t1.Status != store.TodoDoing || t1.SessionID == "" || t2.Status != store.TodoQueued {
-		t.Fatalf("max_parallel=1 must start only the top todo: t1=%s t2=%s", t1.Status, t2.Status)
-	}
-	sess, _ := m.Get(t1.SessionID)
-	if sess.ProjectID != "p1" || sess.TodoID != "t1" || !sess.Worktree {
-		t.Fatalf("session = %+v", sess)
-	}
-
-	waitFor(t, "t1 in review", func() bool { x, _, _ := st.Todo("t1"); return x.Status == store.TodoReview })
+	waitFor(t, "worker done", func() bool { s, _ := m.Get(id); return s.Status == store.StatusDone })
+	m.Wait()
 	lim, ok := m.Limits("fake")
 	if !ok || len(lim.Windows) != 2 || lim.Windows[0].Window != "five_hour" || lim.Windows[0].Utilization != 0.37 {
 		t.Fatalf("limits = %+v ok=%v", lim, ok)
 	}
-	evs, _ := m.Log(t1.SessionID)
+	evs, _ := m.Log(id)
+	var sawDirs, sawCommit bool
 	for _, ev := range evs {
 		if ev.Kind == agent.KindLimits {
 			t.Fatal("limit events must not show up in the transcript")
 		}
-	}
-	var sawDirs, sawCommit bool
-	for _, ev := range evs {
 		sawDirs = sawDirs || strings.Contains(ev.Text, notes)
 		sawCommit = sawCommit || strings.HasPrefix(ev.Text, "committed ")
 	}
 	if !sawDirs || !sawCommit {
 		t.Fatalf("notes dir passed=%v auto-commit=%v: %+v", sawDirs, sawCommit, evs)
 	}
+}
 
+func TestTodosStartMissionsWithinLimit(t *testing.T) {
+	agent.Register("team", newTeam(`[{"id":"t1","title":"only","task":"x","files":["a/**"]}]`))
+	m, st, _, _ := missionEnv(t)
+	for i, title := range []string{"first", "second"} {
+		st.SaveTodo(store.Todo{ID: "t" + string(rune('1'+i)), ProjectID: "p1", Title: title, Status: store.TodoQueued, Priority: 3 - i})
+	}
 	m.ScheduleOnce()
-	waitFor(t, "t2 dispatched", func() bool { x, _, _ := st.Todo("t2"); return x.Status != store.TodoQueued })
-
+	ms1, ok, _ := st.MissionForTodo("t1")
+	if t2, _, _ := st.Todo("t2"); !ok || t2.Status != store.TodoQueued {
+		t.Fatalf("max_parallel=1 must start only the top todo's mission: ok=%v t2=%s", ok, t2.Status)
+	}
+	waitMission(t, m, ms1.ID, "spec gate", waiting(store.PhaseSpec))
+	m.ScheduleOnce()
+	if t2, _, _ := st.Todo("t2"); t2.Status != store.TodoQueued {
+		t.Fatal("a mission waiting at a gate still counts against max_parallel")
+	}
+	if err := m.CancelMission(ms1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if t1, _, _ := st.Todo("t1"); t1.Status != store.TodoOpen {
+		t.Fatalf("cancelled mission must reopen its todo, got %s", t1.Status)
+	}
+	m.ScheduleOnce()
+	if _, ok, _ := st.MissionForTodo("t2"); !ok {
+		t.Fatal("the next todo must start once a slot frees up")
+	}
 	if err := m.SetTodoStatus("t1", store.TodoDone); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Dispatch("t1", d); err == nil {
+	if _, err := m.Dispatch("t1", Defaults{Agent: "team"}); err == nil {
 		t.Fatal("a done todo must not be dispatched again")
 	}
-
-	waitFor(t, "t2 in review", func() bool { x, _, _ := st.Todo("t2"); return x.Status == store.TodoReview })
-	t2, _, _ = st.Todo("t2")
-	if err := m.Remove(t2.SessionID); err != nil {
-		t.Fatal(err)
-	}
-	t2, _, _ = st.Todo("t2")
-	if t2.Status != store.TodoOpen || t2.SessionID != "" {
-		t.Fatalf("released worker must reopen its todo: %+v", t2)
-	}
-
-	if _, err := os.Stat(filepath.Join(notes)); err != nil {
-		t.Fatal(err)
-	}
-	m.Wait()
+	m.StopAll()
 }
 
 func TestProjectRepoPicksCwd(t *testing.T) {
@@ -169,12 +159,11 @@ func TestAskIsReadOnly(t *testing.T) {
 	defer m.Close()
 	repo := gitRepo(t)
 	st.SaveProject(store.Project{ID: "p", Name: "P", Repos: []string{repo}, MaxParallel: 1})
-	st.SaveTodo(store.Todo{ID: "td", ProjectID: "p", Title: "do it", Status: store.TodoOpen})
-	id, err := m.Dispatch("td", Defaults{Agent: "fake", Approval: agent.ApprovalSafe})
+	id, err := m.Spawn(SpawnOpts{Task: "do it", Agent: "fake", Approval: agent.ApprovalSafe, Repo: repo, ProjectID: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "review", func() bool { x, _, _ := st.Todo("td"); return x.Status == store.TodoReview })
+	waitFor(t, "worker done", func() bool { x, _ := m.Get(id); return x.Status == store.StatusDone && !m.Running(id) })
 	s, _ := m.Get(id)
 	head := func() string {
 		out, _ := exec.Command("git", "-C", s.Dir, "rev-parse", "HEAD").Output()
@@ -193,9 +182,6 @@ func TestAskIsReadOnly(t *testing.T) {
 	}
 	if s2, _ := m.Get(id); s2.Status != store.StatusDone {
 		t.Fatalf("status should be restored to done, got %s", s2.Status)
-	}
-	if td, _, _ := st.Todo("td"); td.Status != store.TodoReview {
-		t.Fatalf("ask must not move the todo, got %s", td.Status)
 	}
 	evs, _ := m.Log(id)
 	var sawQuestion, sawMode bool

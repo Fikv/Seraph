@@ -44,6 +44,7 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `a` / `y` | model picker / approval mode |
 | `g` | projects: switch, create, edit, open notes in Obsidian |
 | `t` | the project todo board |
+| `M` | missions: a team of agents per goal |
 | `m` | menu: keycap tiles for every action |
 | `s` | back to the start screen |
 | `c` | MCP servers: browse, install, test, configure |
@@ -68,6 +69,38 @@ Usage bars come from the `rate_limit_event` Claude Code emits during a run: the
 to reset. They show on the board header, the start screen and the picker, and refresh
 whenever a Claude worker runs. `cursor-agent` does not expose usage, so Seraph only
 shows your Cursor plan.
+
+## Missions: a team in a tree
+
+`M` opens missions. A mission is a goal worked on by a team, with Seraph as the
+orchestrator:
+
+```
+✧ Orchestrator (Seraph)
+├─ ♔ Product Owner   spec.md: goal, user stories, acceptance criteria, out of scope   ⏸ you approve
+├─ ◎ Analysts ×0-4   answer the PO's questions about the existing code (in parallel)
+├─ ♖ Tech Lead       plan.md: 1-5 tasks, each owning a disjoint set of paths          ⏸ you approve
+├─ ⌘ Developers      one git worktree each, branched from the mission branch
+│  └─ ◉ Reviewer     fresh context: task + spec + diff, up to 2 rounds, then merge
+├─ ⚗ Tester          writes and runs tests against the criteria; failures go to a fixer
+└─ ♔ Acceptance      the PO checks every criterion against the full diff              ⏸ you approve
+```
+
+- Only developers and the tester write. Everyone else is read-only. Developers own
+  disjoint paths and are merged one by one into `seraph/m-<id>`; a conflict stops the
+  mission until you retry the task (`r`), which rebuilds it on top of the merged work.
+- Every role's output is a markdown artifact in the project's notes folder
+  (`Seraph Missions/…`), so the whole trail is readable in Obsidian. `a` shows it.
+- At a gate: `y` approve, `e` request changes (sent back to the PO, the tech lead or the
+  developers), `x x` cancel. `⏎` opens any role's worker, `v` its diff.
+- `R` assigns a model to each role, for example Opus for the PO, Haiku for analysts and a
+  different provider for the reviewer. Developers and the tester run in **test** mode:
+  edits plus test and build commands only (`go test`, `npm test`, `pytest`, …).
+- Todos on the todo board start missions. `n` on the board still summons a single
+  worker for small things.
+- When the mission is accepted, merge its branch yourself: `git merge seraph/m-<id>`.
+
+A mission runs many agent sessions, so it costs a multiple of a single worker.
 
 ## Projects and the todo board
 

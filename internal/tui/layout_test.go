@@ -100,6 +100,7 @@ func testModel(t *testing.T) *Model {
 		}
 	}
 	m.loadProjects()
+	seedMissions(t, st, notes, repo)
 	m.cursorModels = agent.ParseCursorModels("auto - Auto (default)\ngpt-5.3-codex-high - Codex 5.3 High\nclaude-opus-5-5-high - Claude Opus 5.5 1M High\ngemini-3.1-pro - Gemini 3.1 Pro\ngrok-4.7-high - Grok 4.7 High\nmuse-spark-1.3 - Muse Spark 1.3\nkimi-k3 - Kimi K3\nglm-5.2 - GLM 5.2\n" + strings.Repeat("x", 120) + " - " + strings.Repeat("Very long model name ", 8) + "\n")
 	st.SetSetting("limits:claude", `{"agent":"claude","windows":[{"window":"five_hour","utilization":0.62,"resets_at":"`+time.Now().Add(3*time.Hour).Format(time.RFC3339)+`"},{"window":"seven_day","utilization":0.91,"resets_at":"`+time.Now().Add(80*time.Hour).Format(time.RFC3339)+`"}],"captured":"`+time.Now().Format(time.RFC3339)+`"}`)
 
@@ -196,6 +197,26 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.applyModelFilter()
 			m.catalogErr = strings.Repeat("boom ", 30)
 		},
+		"missions-plan-gate": func(m *Model) { m.openMissions("mplan") },
+		"missions-tree-sel":  func(m *Model) { m.openMissions("mplan"); m.missions.nodeSel = 6 },
+		"missions-blocked":   func(m *Model) { m.openMissions("mblock") },
+		"missions-empty":     func(m *Model) { p := m.projects[0]; m.useProject(&p); m.project.ID = "none"; m.openMissions("") },
+		"missions-new": func(m *Model) {
+			m.openMissions("")
+			m.handleKey(keyMsg("n"))
+			m.ta.SetValue(strings.Repeat("goal text ", 40))
+		},
+		"missions-revise": func(m *Model) {
+			m.openMissions("mplan")
+			m.handleKey(keyMsg("e"))
+			m.missions.input.SetValue(strings.Repeat("change ", 50))
+		},
+		"missions-roles": func(m *Model) {
+			m.mgr.SetRole(store.RoleReviewer, &orch.RoleConfig{Agent: "cursor", Model: "gpt-5.3-codex-high"})
+			m.openMissions("")
+			m.handleKey(keyMsg("R"))
+		},
+		"missions-artifact": func(m *Model) { m.openMissions("mplan"); m.handleKey(keyMsg("a")) },
 		"todo-form-model": func(m *Model) {
 			p := m.projects[0]
 			m.useProject(&p)
@@ -204,8 +225,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
 		},
 	}
-	if len(screens) != 26 {
-		t.Fatalf("expected 26 screens under test, got %d", len(screens))
+	if len(screens) != 34 {
+		t.Fatalf("expected 34 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -425,5 +446,90 @@ func TestModelPickerFlow(t *testing.T) {
 		if !strings.Contains(v, want) {
 			t.Errorf("picker lacks %q", want)
 		}
+	}
+}
+
+func seedMissions(t *testing.T, st *store.Store, notes, repo string) {
+	t.Helper()
+	art := filepath.Join(notes, "Seraph Missions", "m")
+	os.MkdirAll(art, 0o755)
+	spec := filepath.Join(art, "spec.md")
+	os.WriteFile(spec, []byte("# Spec\n\n## Acceptance criteria\n1. AC1 "+strings.Repeat("long criterion ", 30)+"\n"), 0o644)
+	plan := filepath.Join(art, "plan.md")
+	os.WriteFile(plan, []byte("# Plan\n"+strings.Repeat("- step\n", 80)), 0o644)
+	now := time.Now()
+	st.SaveMission(store.Mission{ID: "mplan", ProjectID: "", Title: "Payments with BLIK and a long mission title that keeps going", Goal: "g", Repo: repo, Base: "main",
+		Branch: "seraph/m-mplan", Dir: repo, Artifacts: art, Phase: store.PhasePlan, State: store.MissionWaiting, Gate: store.PhasePlan, CreatedAt: now})
+	st.SaveMission(store.Mission{ID: "mblock", Title: "Blocked one", Goal: "g", Repo: repo, Base: "main", Branch: "seraph/m-mblock", Dir: repo, Artifacts: art,
+		Phase: store.PhaseBuild, State: store.MissionBlocked, Error: "merge conflict in " + strings.Repeat("internal/very/long/path.go, ", 6), CreatedAt: now.Add(-time.Hour)})
+	st.SaveMission(store.Mission{ID: "mdone", Title: "Done one", Goal: "g", Repo: repo, Branch: "seraph/m-mdone", Artifacts: art, Phase: store.PhaseDone, State: store.MissionDone, CreatedAt: now.Add(-2 * time.Hour)})
+	nodes := []store.Node{
+		{ID: "n1", MissionID: "mplan", Role: store.RolePO, Title: "Specification", Status: store.NodeDone, Artifact: spec, SessionID: "s00000"},
+		{ID: "n2", MissionID: "mplan", Role: store.RoleAnalyst, Title: strings.Repeat("How does the checkout talk to the payment provider? ", 3), Status: store.NodeDone, SessionID: "s00001"},
+		{ID: "n3", MissionID: "mplan", Role: store.RoleAnalyst, Title: "Where are webhooks verified?", Status: store.NodeWorking, SessionID: "s00003"},
+		{ID: "n4", MissionID: "mplan", Role: store.RoleLead, Title: "Plan", Status: store.NodeDone, Artifact: plan, Note: strings.Repeat("\"api\" and \"ui\" both own src/** / src/api/** and run in parallel\n", 3)},
+		{ID: "n5", MissionID: "mplan", Role: store.RoleDev, Title: "Backend endpoint for BLIK codes", Files: []string{"internal/api/**", "internal/payments/blik/**"}, Status: store.NodeMerged, Round: 1},
+		{ID: "n6", MissionID: "mplan", ParentID: "n5", Role: store.RoleReviewer, Title: "Review of Backend endpoint", Status: store.NodeDone, Verdict: "CHANGES"},
+		{ID: "n7", MissionID: "mplan", ParentID: "n5", Role: store.RoleReviewer, Title: "Review of Backend endpoint", Status: store.NodeDone, Verdict: "APPROVE", Round: 1},
+		{ID: "n8", MissionID: "mplan", Role: store.RoleDev, Title: "UI", Files: []string{"web/**"}, Status: store.NodeFailed, Note: "boom"},
+		{ID: "n9", MissionID: "mplan", Role: store.RoleTester, Title: "Tests", Status: store.NodeDone, Verdict: "FAIL"},
+		{ID: "n10", MissionID: "mplan", ParentID: "n9", Role: store.RoleDev, Title: "Fix failing tests", Status: store.NodePending},
+		{ID: "n11", MissionID: "mplan", Role: store.RoleAcceptance, Title: "Acceptance", Status: store.NodePending},
+	}
+	for i, n := range nodes {
+		n.Position = i + 1
+		if err := st.SaveNode(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.SaveNode(store.Node{ID: "b1", MissionID: "mblock", Role: store.RoleDev, Title: "conflicting", Status: store.NodeFailed, Note: "merge conflict", Position: 1})
+}
+
+func TestMissionsScreenFlow(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h = 140, 44
+	m.scr = scrBoard
+	m.handleKey(keyMsg("M"))
+	if m.scr != scrMissions || len(m.missions.list) != 3 {
+		t.Fatalf("missions screen: scr=%v list=%d", m.scr, len(m.missions.list))
+	}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"Orchestrator", "Product Owner", "Analyst", "Tech Lead", "Developer", "Reviewer", "Fixer", "Tester", "Acceptance", "PLAN READY FOR YOUR DECISION", "both own", "approve", "changes", "fail"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missions view lacks %q", want)
+		}
+	}
+	m.handleKey(keyMsg("tab"))
+	m.handleKey(keyMsg("a"))
+	if m.missions.mode != mmArtifact || !strings.Contains(ansi.Strip(m.View()), "Spec") {
+		t.Fatal("a on the PO node must open spec.md")
+	}
+	m.handleKey(keyMsg("esc"))
+	m.handleKey(keyMsg("down"))
+	m.handleKey(keyMsg("enter"))
+	if m.scr != scrDetail || m.openID != "s00001" {
+		t.Fatalf("enter on a node opens its worker: scr=%v id=%s", m.scr, m.openID)
+	}
+	m.handleKey(keyMsg("esc"))
+	if m.scr != scrMissions {
+		t.Fatal("esc from a worker returns to missions")
+	}
+	m.handleKey(keyMsg("R"))
+	m.handleKey(keyMsg("enter"))
+	if m.scr != scrModels {
+		t.Fatal("roles: enter opens the model picker")
+	}
+	m.pickModel(agent.Model{Agent: "cursor", ID: "gemini-3.1-pro", Name: "Gemini 3.1 Pro", Provider: "Google"})
+	if c := m.mgr.Role(store.RolePO); c.Agent != "cursor" || c.Model != "gemini-3.1-pro" || c.Approval != agent.ApprovalReadOnly {
+		t.Fatalf("role = %+v", c)
+	}
+	if m.scr != scrMissions || m.missions.mode != mmRoles {
+		t.Fatal("picker must return to the roles list")
+	}
+	m.handleKey(keyMsg("esc"))
+	m.handleKey(keyMsg("esc"))
+	if m.scr != scrBoard {
+		t.Fatal("esc returns to the board")
 	}
 }

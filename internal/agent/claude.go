@@ -25,6 +25,8 @@ func (Claude) Args(s Spec) []string {
 		args = append(args, "--permission-mode", "bypassPermissions")
 	case ApprovalReadOnly, ApprovalAsk:
 		args = append(args, "--allowedTools", "Read,Grep,Glob")
+	case ApprovalTest:
+		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", testAllowedTools())
 	default:
 		args = append(args, "--permission-mode", "acceptEdits")
 	}
