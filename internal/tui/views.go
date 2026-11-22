@@ -60,7 +60,10 @@ func (m *Model) overlay(box string) string {
 }
 
 func (m *Model) header() string {
-	left := sGoldB.Render("✧ SERAPH") + "  " + m.projectLabel() + "  " + sDim.Render(m.repoText)
+	left := spinTitle() + "  " + m.projectLabel() + "  " + sDim.Render(m.repoText)
+	if m.scr == scrBoard && m.bigBanner() {
+		left = m.projectLabel() + "  " + sDim.Render(m.repoText)
+	}
 	ls := m.lanes()
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
@@ -95,7 +98,12 @@ func hints(width int, items ...string) string {
 }
 
 func (m *Model) boardView() string {
+	top := m.header()
 	bodyH := max(m.h-5, 4)
+	if m.bigBanner() {
+		top = m.banner() + "\n" + top
+		bodyH = max(m.h-8, 4)
+	}
 	ls := m.lanes()
 
 	var body string
@@ -118,12 +126,12 @@ func (m *Model) boardView() string {
 		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("o", "o", "notes"), m.chip("v", "v", "diff"), m.chip("c", "c", "mcp"),
 		m.chip("r", "r", "resume"), m.chip("x", "x", "stop"), m.chip("d", "d", "release"),
 		m.chip("a", "a", "agent"), m.chip("y", "y", "mode"), m.chip("q", "q", "quit"))
-	return m.header() + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
+	return top + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
 }
 
 func (m *Model) emptyView(h int) string {
 	msg := lipgloss.JoinVertical(lipgloss.Center,
-		sGold.Render("✧  the heavens are quiet  ✧"),
+		sGold.Render(spinNow(false)+"  the heavens are quiet  "+spinNow(true)),
 		"",
 		sDim.Render("press ")+sGold.Render("n")+sDim.Render(" to summon a worker or ")+sGold.Render("p")+sDim.Render(" to divine a plan"),
 	)
