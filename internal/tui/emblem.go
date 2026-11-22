@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	emblemW     = 42
+	emblemW     = 35
 	emblemH     = 5
 	emblemBuild = 1100 * time.Millisecond
 	emblemLap   = 5200 * time.Millisecond
@@ -23,12 +23,12 @@ const (
 
 var (
 	emblemFont = map[rune][3]string{
-		'S': {"┏━━╸", "┗━━┓", "━━━┛"},
-		'E': {"┏━━╸", "┣━  ", "┗━━╸"},
-		'R': {"┏━━┓", "┣━┳┛", "╹ ┗╸"},
-		'A': {"┏━━┓", "┣━━┫", "╹  ╹"},
-		'P': {"┏━━┓", "┣━━┛", "╹   "},
-		'H': {"╻  ╻", "┣━━┫", "╹  ╹"},
+		'S': {"┏━╸", "┗━┓", "━━┛"},
+		'E': {"┏━╸", "┣━ ", "┗━╸"},
+		'R': {"┏━┓", "┣┳┛", "╹┗╸"},
+		'A': {"┏━┓", "┣━┫", "╹ ╹"},
+		'P': {"┏━┓", "┣━┛", "╹  "},
+		'H': {"╻ ╻", "┣━┫", "╹ ╹"},
 	}
 	glitchGlyphs = []string{"▖", "▘", "▝", "▗", "▚", "▞", "▙", "▟"}
 	sEmblemWord  = t.FG(t.Ivory).Bold(true)
@@ -55,8 +55,8 @@ type orbitPoint struct {
 var (
 	emblemBase  [emblemH][emblemW]emblemCell
 	emblemOrbit []orbitPoint
-	wordLeft    = 6
-	wordRight   = 37
+	wordLeft    = 5
+	wordRight   = 29
 )
 
 func behindWord(x, y int) bool { return y >= 1 && y <= 3 && x >= wordLeft && x <= wordRight }
@@ -74,7 +74,7 @@ func init() {
 			}
 		}
 	}
-	const left = 6
+	const left = 5
 	for row := 0; row < 3; row++ {
 		var line []string
 		for _, r := range "SERAPH" {
@@ -83,10 +83,10 @@ func init() {
 		x := left + (2 - row)
 		put(1+row, x, strings.Join(line, " "), sEmblemWord, true)
 	}
-	put(1, left+2+29+1, "━━━╸", sEmblemBlade, false)
+	put(1, left+2+23+1, "━━╸", sEmblemBlade, false)
 	put(3, left-4, "╺━━━", sEmblemBlade, false)
 
-	cx, cy, rx, ry, tilt := 21.0, 2.0, 20.5, 2.15, -0.07
+	cx, cy, rx, ry, tilt := 17.0, 2.0, 16.6, 2.15, -0.07
 	type cellPt struct {
 		x, y  int
 		front bool

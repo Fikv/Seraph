@@ -40,7 +40,7 @@ func (m *Model) splashElapsed() time.Duration {
 }
 
 func titleDone() time.Duration {
-	return titleStart + lineBuild
+	return titleStart + emblemBuild
 }
 
 func (m *Model) tagDone() time.Duration {

@@ -58,10 +58,10 @@ func logoStyleFor(setting string) string {
 	if v := os.Getenv("SERAPH_LOGO"); v == LogoOrbit || v == LogoLine {
 		return v
 	}
-	if setting == LogoOrbit {
-		return LogoOrbit
+	if setting == LogoLine {
+		return LogoLine
 	}
-	return LogoLine
+	return LogoOrbit
 }
 
 func logoSize(style string) (int, int) {

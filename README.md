@@ -129,10 +129,10 @@ seraph mcp list | test <name> | rm <name>
 
 ## Logo
 
-The board and the start screen show the SERAPH mark with a glitch build-in, spinning stars and a
-comet running along the line under it. `seraph logo style orbit` switches to the alternative mark
-(slanted blade letters inside an orbit ring); `seraph logo style line` switches back.
-`SERAPH_LOGO=line|orbit` overrides the setting for one run.
+The board and the start screen show the SERAPH mark: slanted blade letters inside an orbit ring,
+built in with a pixel glitch, with a spinning star circling the ring. `seraph logo style line`
+switches to the alternative mark (thin rounded letters with a comet running along a line);
+`seraph logo style orbit` switches back. `SERAPH_LOGO=orbit|line` overrides the setting for one run.
 
 ## Storage
 
