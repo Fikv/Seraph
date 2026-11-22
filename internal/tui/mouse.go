@@ -103,6 +103,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	kind, arg, _ := strings.Cut(id, ":")
 	switch kind {
 	case "key":
+		if p, ok := m.currentPermission(); ok {
+			return m.permissionKey(p, keyMsg(arg))
+		}
 		return m.handleKey(keyMsg(arg))
 	case "lane":
 		if n, err := strconv.Atoi(arg); err == nil {

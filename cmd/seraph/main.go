@@ -63,6 +63,7 @@ State lives in %s (override with SERAPH_HOME).
 type common struct {
 	agent, model               string
 	yolo, noWorktree, noSplash bool
+	confirm                    bool
 	agentSet                   bool
 }
 
@@ -79,6 +80,7 @@ func parseFlags(name string, args []string) (*common, []string, error) {
 	fs.StringVar(&c.model, "model", "", "")
 	fs.StringVar(&c.model, "m", "", "")
 	fs.BoolVar(&c.yolo, "yolo", false, "")
+	fs.BoolVar(&c.confirm, "confirm", false, "")
 	fs.BoolVar(&c.noWorktree, "no-worktree", false, "")
 	fs.BoolVar(&c.noSplash, "no-splash", false, "")
 	if err := fs.Parse(args); err != nil {
@@ -99,6 +101,9 @@ func parseFlags(name string, args []string) (*common, []string, error) {
 func (c *common) approval() agent.Approval {
 	if c.yolo {
 		return agent.ApprovalYolo
+	}
+	if c.confirm {
+		return agent.ApprovalConfirm
 	}
 	return agent.ApprovalSafe
 }
@@ -122,6 +127,8 @@ func run(args []string) error {
 			return cmdTodo(args[1:])
 		case "db":
 			return cmdDB()
+		case "permit":
+			return cmdPermit(args[1:])
 		case "doctor":
 			return cmdDoctor()
 		case "models":

@@ -108,6 +108,8 @@ func (m *Manager) missionRole(missionID string, r store.Role) RoleConfig {
 		c.Approval = agent.ApprovalReadOnly
 	case c.Approval == "" && d.Approval == agent.ApprovalYolo:
 		c.Approval = agent.ApprovalYolo
+	case c.Approval == "" && d.Approval == agent.ApprovalConfirm:
+		c.Approval = agent.ApprovalConfirm
 	case c.Approval == "" || c.Approval == agent.ApprovalSafe:
 		c.Approval = agent.ApprovalTest
 	}
@@ -893,6 +895,8 @@ func artifactName(n store.Node, all []store.Node) string {
 	}
 	return fmt.Sprintf("dev-%d-%s.md", idx, slug(n.Title))
 }
+
+func (m *Manager) ResultText(id string) string { return m.resultText(id) }
 
 func (m *Manager) resultText(id string) string {
 	evs, _ := m.Log(id)

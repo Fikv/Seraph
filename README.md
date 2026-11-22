@@ -41,7 +41,7 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `⏎` | open a session: live transcript, send follow-ups |
 | `r` | resume a stopped/failed worker |
 | `x` / `d` | stop / release a worker |
-| `a` / `y` | model picker / approval mode |
+| `a` / `y` | model picker / approval mode (safe → confirm → yolo) |
 | `g` | projects: switch, create, edit, open notes in Obsidian |
 | `t` | the project todo board |
 | `M` | missions: a team of agents per goal |
@@ -70,6 +70,27 @@ Usage bars come from the `rate_limit_event` Claude Code emits during a run: the
 to reset. They show on the board header, the start screen and the picker, and refresh
 whenever a Claude worker runs. `cursor-agent` does not expose usage, so Seraph only
 shows your Cursor plan.
+
+## Permission modes and the agent window
+
+`y` on the board cycles the mode for new workers (also `-yolo` / `-confirm` on the command line):
+
+| mode | what runs without asking |
+|------|--------------------------|
+| `safe` | file edits; anything that needs permission is refused |
+| `confirm` | file edits and test/build commands; **every other command waits for you** (Claude Code) |
+| `yolo` | everything, inside the worker's worktree |
+
+In `confirm` mode a request such as `git push origin main` pops up on any screen:
+`y` allow once, `a` always allow that command prefix for this worker, `n` deny (the
+agent is told not to work around it), `⏎` open the worker, `esc` later. Compound commands
+(`&&`, `|`, `;`, redirects) always ask. It uses Claude Code's `--permission-prompt-tool`
+with a small MCP server (`seraph permit`); `cursor-agent` has no such hook, so there
+`confirm` behaves like `safe`.
+
+In a worker's window a bar bounces above the input while the agent works. `ctrl+t`
+releases the mouse so you can select text with your terminal (Shift+drag also works in
+Windows Terminal), and `ctrl+o` copies the agent's last answer to the clipboard.
 
 ## Releasing: validator, merge, push
 

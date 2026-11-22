@@ -85,8 +85,11 @@ func statusPill(st store.Status, frame int) string {
 }
 
 func approvalLabel(a string) string {
-	if a == "yolo" {
+	switch a {
+	case "yolo":
 		return sRose.Render("yolo")
+	case "confirm":
+		return sGold.Render("confirm")
 	}
 	return sMint.Render("safe")
 }

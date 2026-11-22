@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,6 +51,7 @@ const (
 	ApprovalAsk      Approval = "ask"
 	ApprovalTest     Approval = "test"
 	ApprovalCheck    Approval = "check"
+	ApprovalConfirm  Approval = "confirm"
 )
 
 type Spec struct {
@@ -61,6 +63,16 @@ type Spec struct {
 	SystemPrompt string
 	ApproveMCPs  bool
 	AddDirs      []string
+	Permit       []string
+}
+
+const PermitTool = "mcp__seraph_permit__approve"
+
+func permitConfig(cmd []string) string {
+	b, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"seraph_permit": map[string]any{"command": cmd[0], "args": cmd[1:]},
+	}})
+	return string(b)
 }
 
 type Driver interface {

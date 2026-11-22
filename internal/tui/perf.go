@@ -18,10 +18,12 @@ type viewStats struct {
 	activeMissions  int
 	waitingMissions int
 	badges          map[string]string
+	permissions     []store.Permission
+	waitingFor      map[string]string
 }
 
 func (m *Model) refreshStats() {
-	s := viewStats{at: time.Now()}
+	s := viewStats{at: time.Now(), permissions: m.stats.permissions, waitingFor: m.stats.waitingFor}
 	s.limits, s.hasLimits = m.mgr.Limits("claude")
 	if all, err := m.mgr.Missions(); err == nil {
 		for _, ms := range all {

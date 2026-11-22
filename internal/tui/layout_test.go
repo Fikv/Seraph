@@ -223,6 +223,16 @@ func TestLayoutFitsTerminal(t *testing.T) {
 		"release-report":    func(m *Model) { m.openRelease(store.TargetSession, "s00000", scrBoard); m.handleKey(keyMsg("a")) },
 		"release-mission":   func(m *Model) { m.openMissions("mdone"); m.handleKey(keyMsg("w")) },
 		"release-none":      func(m *Model) { m.openRelease(store.TargetSession, "s00002", scrBoard) },
+		"permission": func(m *Model) {
+			m.scr = scrBoard
+			m.stats.permissions = []store.Permission{{ID: "p1", SessionID: "s00000", Tool: "Bash", Input: map[string]any{"command": "git push origin main --force-with-lease " + strings.Repeat("--very-long-flag ", 12), "description": strings.Repeat("Push the branch ", 10)}}, {ID: "p2", SessionID: "s00001", Tool: "WebFetch", Input: map[string]any{"url": "https://example.com"}}}
+		},
+		"detail-waiting": func(m *Model) {
+			m.openDetail("s00000")
+			m.stats.waitingFor = map[string]string{"s00000": "Bash: " + strings.Repeat("rm -rf build ", 20)}
+			m.permitSnooze["p1"] = time.Now().Add(time.Hour)
+		},
+		"detail-select": func(m *Model) { m.openDetail("s00000"); m.toggleSelectMode() },
 		"todo-form-model": func(m *Model) {
 			p := m.projects[0]
 			m.useProject(&p)
@@ -231,8 +241,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
 		},
 	}
-	if len(screens) != 39 {
-		t.Fatalf("expected 39 screens under test, got %d", len(screens))
+	if len(screens) != 42 {
+		t.Fatalf("expected 42 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -642,5 +652,58 @@ func TestReleaseSummaryLine(t *testing.T) {
 	}
 	if agoText(time.Now()) != "just now" {
 		t.Fatal("agoText")
+	}
+}
+
+func TestWorkingBarBounces(t *testing.T) {
+	w := 60
+	seen := map[int]bool{}
+	prev := -1
+	dir, flips := 0, 0
+	for ms := 0; ms < 4000; ms += 20 {
+		bar := ansi.Strip(workingBar(w, time.Duration(ms)*time.Millisecond))
+		if n := len([]rune(bar)); n != w {
+			t.Fatalf("bar width %d != %d", n, w)
+		}
+		pos := strings.IndexRune(bar, '▰') / len("▰")
+		pos = len([]rune(bar[:strings.IndexRune(bar, '▰')]))
+		seen[pos] = true
+		if prev >= 0 && pos != prev {
+			d := 1
+			if pos < prev {
+				d = -1
+			}
+			if dir != 0 && d != dir {
+				flips++
+			}
+			dir = d
+		}
+		prev = pos
+	}
+	if !seen[0] || !seen[w-barSeg] || flips < 2 {
+		t.Fatalf("the bar must reach both ends and turn back: ends=%v/%v flips=%d", seen[0], seen[w-barSeg], flips)
+	}
+}
+
+func TestPermissionModal(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h, m.scr = 120, 40, scrBoard
+	m.stats.permissions = []store.Permission{{ID: "px", SessionID: "s00000", Tool: "Bash", Input: map[string]any{"command": "git push origin main"}}}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"PERMISSION", "git push origin main", "allow once", "always allow `git push …`", "deny"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("modal lacks %q", want)
+		}
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if m.scr != scrBoard {
+		t.Fatal("keys must go to the modal, not the board (n would open a new worker)")
+	}
+	m.stats.permissions = []store.Permission{{ID: "py", SessionID: "s00000", Tool: "Bash", Input: map[string]any{"command": "rm -rf x"}}}
+	m.permAt = time.Now()
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if _, ok := m.currentPermission(); ok {
+		t.Fatal("esc snoozes the request")
 	}
 }

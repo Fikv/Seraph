@@ -132,6 +132,9 @@ type Model struct {
 	picker         *modelPicker
 	missions       *missionsState
 	release        *releaseState
+	selectMode     bool
+	permitSnooze   map[string]time.Time
+	permAt         time.Time
 	lastView       string
 	skipRender     bool
 	swallowAt      time.Time
@@ -182,6 +185,7 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 
 	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20)}
 	m.loadCurrentProject()
+	m.permitSnooze = map[string]time.Time{}
 	m.logoStyle = logoStyleFor(mgr.Store().Setting(LogoStyleSetting))
 	defer m.refreshStats()
 	if !opt.AgentSet {
@@ -217,6 +221,9 @@ func (m *Model) tickEvery() time.Duration {
 	}
 	if m.scr == scrBoard && m.cornerEmblem() {
 		return 66 * time.Millisecond
+	}
+	if m.scr == scrDetail && m.detailWorking() {
+		return 50 * time.Millisecond
 	}
 	return 110 * time.Millisecond
 }
@@ -299,6 +306,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshStats()
 			m.followCurrentProject()
 		}
+		if time.Since(m.permAt) > 400*time.Millisecond {
+			m.refreshPermissions()
+		}
 		if m.scr == scrDetail {
 			m.refreshDetail(false)
 		}
@@ -346,6 +356,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mouseGarbage(msg) {
 			m.skipRender = m.lastView != ""
 			return m, nil
+		}
+		if p, ok := m.currentPermission(); ok && msg.String() != "ctrl+c" {
+			return m.permissionKey(p, msg)
 		}
 		if msg.String() == "ctrl+c" {
 			if m.planCancel != nil {
@@ -557,10 +570,16 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) toggleApproval() {
-	if m.opt.Approval == agent.ApprovalYolo {
-		m.opt.Approval = agent.ApprovalSafe
-	} else {
+	switch m.opt.Approval {
+	case agent.ApprovalSafe, "":
+		m.opt.Approval = agent.ApprovalConfirm
+		m.setFlash("confirm: edits and test commands run; every other command waits for your y/n", false)
+	case agent.ApprovalConfirm:
 		m.opt.Approval = agent.ApprovalYolo
+		m.setFlash("yolo: agents may run any command without asking", true)
+	default:
+		m.opt.Approval = agent.ApprovalSafe
+		m.setFlash("safe: edits only; commands that need permission are refused", false)
 	}
 }
 
@@ -607,6 +626,7 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.fi.Blur()
 		m.scr = scrBoard
+		restore := m.leaveSelectMode()
 		switch m.backTo {
 		case scrTodos:
 			m.scr = scrTodos
@@ -621,7 +641,7 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.backTo = scrBoard
-		return m, nil
+		return m, restore
 	case "enter":
 		text := strings.TrimSpace(m.fi.Value())
 		if text == "" {
@@ -633,6 +653,11 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.fi.SetValue("")
 		m.refreshDetail(true)
+		return m, nil
+	case "ctrl+t":
+		return m, m.toggleSelectMode()
+	case "ctrl+o":
+		m.copyLastAnswer()
 		return m, nil
 	case "ctrl+x":
 		m.mgr.Stop(m.openID)
