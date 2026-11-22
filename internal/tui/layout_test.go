@@ -218,6 +218,11 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.handleKey(keyMsg("R"))
 		},
 		"missions-artifact": func(m *Model) { m.openMissions("mplan"); m.handleKey(keyMsg("a")) },
+		"release-fail":      func(m *Model) { m.openRelease(store.TargetSession, "s00000", scrBoard) },
+		"release-merged":    func(m *Model) { m.openRelease(store.TargetSession, "s00003", scrBoard); m.release.armed = "P" },
+		"release-report":    func(m *Model) { m.openRelease(store.TargetSession, "s00000", scrBoard); m.handleKey(keyMsg("a")) },
+		"release-mission":   func(m *Model) { m.openMissions("mdone"); m.handleKey(keyMsg("w")) },
+		"release-none":      func(m *Model) { m.openRelease(store.TargetSession, "s00002", scrBoard) },
 		"todo-form-model": func(m *Model) {
 			p := m.projects[0]
 			m.useProject(&p)
@@ -226,8 +231,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
 		},
 	}
-	if len(screens) != 34 {
-		t.Fatalf("expected 34 screens under test, got %d", len(screens))
+	if len(screens) != 39 {
+		t.Fatalf("expected 39 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -484,6 +489,10 @@ func seedMissions(t *testing.T, st *store.Store, notes, repo string) {
 		}
 	}
 	st.SaveNode(store.Node{ID: "b1", MissionID: "mblock", Role: store.RoleDev, Title: "conflicting", Status: store.NodeFailed, Note: "merge conflict", Position: 1})
+	report := "## Requests\n| push | release step |\n## Problems\n- [blocking] README.md:12 " + strings.Repeat("broken link ", 20) + "\nVERDICT: FAIL"
+	st.SaveRelease(store.Release{ID: "r1", Kind: store.TargetSession, TargetID: "s00000", Title: "Add a very long title " + strings.Repeat("x", 80), Repo: repo, Branch: "seraph/s00000", Base: "main", Status: store.ReleaseFail, Report: report, Note: strings.Repeat("the validator changed files; they were stashed ", 3), SessionID: "s00001"})
+	st.SaveRelease(store.Release{ID: "r2", Kind: store.TargetSession, TargetID: "s00003", Title: "Another done", Repo: repo, Branch: "seraph/s00003", Base: "main", Status: store.ReleasePass, Report: "VERDICT: PASS", MergedAt: time.Now(), MergeSHA: "abc1234"})
+	st.SaveRelease(store.Release{ID: "r3", Kind: store.TargetMission, TargetID: "mdone", Title: "Done one", Repo: repo, Branch: "seraph/m-mdone", Base: "main", Status: store.ReleasePass, Report: "VERDICT: PASS", MergedAt: time.Now(), PushedAt: time.Now()})
 }
 
 func TestMissionsScreenFlow(t *testing.T) {
@@ -578,5 +587,60 @@ func TestIdleMotionSkipsRender(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	if m.ta.Value() != "x" {
 		t.Fatalf("real typing must reach the input: %q", m.ta.Value())
+	}
+}
+
+func TestReleaseScreen(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h, m.scr = 140, 44, scrBoard
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "validation failed") || !strings.Contains(v, "merged") {
+		t.Fatalf("cards must show release state:\n%s", v)
+	}
+	m.lane = laneAscended
+	for i, x := range m.lanes()[laneAscended] {
+		if x.ID == "s00000" {
+			m.idx[laneAscended] = i
+		}
+	}
+	m.handleKey(keyMsg("w"))
+	if m.scr != scrRelease || m.release.id != "s00000" {
+		t.Fatalf("w opens the release of the selected worker: %v", m.scr)
+	}
+	v = ansi.Strip(m.View())
+	for _, want := range []string{"1 VALIDATE", "FAIL", "[blocking] README.md:12", "2 MERGE", "3 PUSH", "send findings", "stashed"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("release view lacks %q", want)
+		}
+	}
+	if strings.Contains(v, " m  merge") {
+		t.Error("a failed validation must not offer merge")
+	}
+	m.handleKey(keyMsg("a"))
+	if !m.release.report {
+		t.Fatal("a opens the report")
+	}
+	m.handleKey(keyMsg("esc"))
+	m.handleKey(keyMsg("esc"))
+	if m.scr != scrBoard || m.release != nil {
+		t.Fatal("esc closes the release")
+	}
+	for _, s := range m.mgr.Sessions() {
+		if s.Role != "" {
+			t.Fatal("fixture should not contain validator sessions")
+		}
+	}
+}
+
+func TestReleaseSummaryLine(t *testing.T) {
+	if got := summaryLine("No [blocking] problems found.\nVERDICT: PASS"); got != "no blocking problems reported" {
+		t.Fatalf("prose mentioning [blocking] is not a finding: %q", got)
+	}
+	if got := summaryLine("## Problems\n- [blocking] a.go:1 x\n2. [blocking] b.go:2 y\n- [minor] c"); !strings.HasPrefix(got, "2 blocking problems · first: [blocking] a.go:1") {
+		t.Fatalf("summary = %q", got)
+	}
+	if agoText(time.Now()) != "just now" {
+		t.Fatal("agoText")
 	}
 }

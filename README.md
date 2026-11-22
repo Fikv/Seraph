@@ -45,6 +45,7 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `g` | projects: switch, create, edit, open notes in Obsidian |
 | `t` | the project todo board |
 | `M` | missions: a team of agents per goal |
+| `w` | release the selected worker: validate, merge, push |
 | `m` | menu: keycap tiles for every action |
 | `s` | back to the start screen |
 | `c` | MCP servers: browse, install, test, configure |
@@ -69,6 +70,23 @@ Usage bars come from the `rate_limit_event` Claude Code emits during a run: the
 to reset. They show on the board header, the start screen and the picker, and refresh
 whenever a Claude worker runs. `cursor-agent` does not expose usage, so Seraph only
 shows your Cursor plan.
+
+## Releasing: validator, merge, push
+
+Workers and missions commit on their own branch (`seraph/<id>`) in a worktree under
+`~/.seraph`, so your checkout stays untouched until you release. `w` on a card (or on an
+accepted mission) opens the release:
+
+1. **Validate** (`⏎`): an independent validator agent with fresh eyes checks every ask in
+   your request, runs the build, tests and linters, and reads the diff for unrelated
+   changes, leftovers and secrets. It can read and run checks but cannot edit. It ends
+   with PASS or FAIL. On FAIL, `f` sends its findings back to the worker.
+2. **Merge** (`m`): only after a PASS on an unchanged branch, into the base branch of your
+   checkout, which must be on that branch with no uncommitted changes.
+3. **Push** (`P` twice): pushes the base branch to `origin`.
+
+Cards show where each worker stands: `✓ validated`, `✗ validation failed`, `⇢ merged`,
+`↑ pushed`. `R` on the missions screen sets the validator's model too.
 
 ## Missions: a team in a tree
 
@@ -98,7 +116,7 @@ orchestrator:
   edits plus test and build commands only (`go test`, `npm test`, `pytest`, …).
 - Todos on the todo board start missions. `n` on the board still summons a single
   worker for small things.
-- When the mission is accepted, merge its branch yourself: `git merge seraph/m-<id>`.
+- When the mission is accepted, `w` releases it: validator, merge into the base branch, push.
 
 A mission runs many agent sessions, so it costs a multiple of a single worker.
 

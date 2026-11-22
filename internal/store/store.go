@@ -51,6 +51,7 @@ type Session struct {
 	TodoID         string    `json:"todo_id,omitempty"`
 	MissionID      string    `json:"mission_id,omitempty"`
 	NodeID         string    `json:"node_id,omitempty"`
+	Role           string    `json:"role,omitempty"`
 	OwnerPID       int       `json:"-"`
 	HeartbeatAt    time.Time `json:"-"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -196,6 +197,28 @@ var migrations = []string{
 	CREATE INDEX mission_nodes_mission ON mission_nodes(mission_id, position);
 	ALTER TABLE sessions ADD COLUMN mission_id TEXT NOT NULL DEFAULT '';
 	ALTER TABLE sessions ADD COLUMN node_id TEXT NOT NULL DEFAULT '';`,
+	`CREATE TABLE releases (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL,
+		target_id TEXT NOT NULL,
+		title TEXT NOT NULL DEFAULT '',
+		repo TEXT NOT NULL,
+		branch TEXT NOT NULL,
+		base TEXT NOT NULL,
+		head TEXT NOT NULL DEFAULT '',
+		session_id TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		report TEXT NOT NULL DEFAULT '',
+		note TEXT NOT NULL DEFAULT '',
+		merged_at INTEGER NOT NULL DEFAULT 0,
+		merge_sha TEXT NOT NULL DEFAULT '',
+		pushed_at INTEGER NOT NULL DEFAULT 0,
+		push_out TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE INDEX releases_target ON releases(kind, target_id, created_at DESC);
+	ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT '';`,
 }
 
 func Open() (*Store, error) {
@@ -273,11 +296,11 @@ func b2i(b bool) int {
 
 const sessionCols = `id, title, task, agent, model, approval, repo, dir, branch, base, worktree, status,
 	agent_session_id, cost, turns, last_line, error, owner_pid, heartbeat_at, created_at, updated_at, project_id, todo_id,
-	mission_id, node_id`
+	mission_id, node_id, role`
 
 func (s *Store) Save(sess Session) error {
 	_, err := s.db.Exec(`INSERT INTO sessions (`+sessionCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title=excluded.title, task=excluded.task, agent=excluded.agent, model=excluded.model,
 			approval=excluded.approval, repo=excluded.repo, dir=excluded.dir, branch=excluded.branch,
@@ -286,11 +309,11 @@ func (s *Store) Save(sess Session) error {
 			last_line=excluded.last_line, error=excluded.error, owner_pid=excluded.owner_pid,
 			heartbeat_at=excluded.heartbeat_at, updated_at=excluded.updated_at,
 			project_id=excluded.project_id, todo_id=excluded.todo_id,
-			mission_id=excluded.mission_id, node_id=excluded.node_id`,
+			mission_id=excluded.mission_id, node_id=excluded.node_id, role=excluded.role`,
 		sess.ID, sess.Title, sess.Task, sess.Agent, sess.Model, sess.Approval, sess.Repo, sess.Dir,
 		sess.Branch, sess.Base, b2i(sess.Worktree), string(sess.Status), sess.AgentSessionID, sess.Cost,
 		sess.Turns, sess.LastLine, sess.Error, sess.OwnerPID, ms(sess.HeartbeatAt), ms(sess.CreatedAt), ms(sess.UpdatedAt),
-		sess.ProjectID, sess.TodoID, sess.MissionID, sess.NodeID)
+		sess.ProjectID, sess.TodoID, sess.MissionID, sess.NodeID, sess.Role)
 	return err
 }
 
@@ -304,7 +327,7 @@ func scanSession(r scanner) (Session, error) {
 	err := r.Scan(&sess.ID, &sess.Title, &sess.Task, &sess.Agent, &sess.Model, &sess.Approval, &sess.Repo,
 		&sess.Dir, &sess.Branch, &sess.Base, &worktree, &status, &sess.AgentSessionID, &sess.Cost, &sess.Turns,
 		&sess.LastLine, &sess.Error, &sess.OwnerPID, &hb, &created, &updated, &sess.ProjectID, &sess.TodoID,
-		&sess.MissionID, &sess.NodeID)
+		&sess.MissionID, &sess.NodeID, &sess.Role)
 	sess.Status = Status(status)
 	sess.Worktree = worktree != 0
 	sess.HeartbeatAt, sess.CreatedAt, sess.UpdatedAt = fromMS(hb), fromMS(created), fromMS(updated)

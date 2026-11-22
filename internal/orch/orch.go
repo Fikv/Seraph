@@ -22,6 +22,7 @@ const workerPrompt = `You are a Seraph worker, one of several coding agents work
 You run in an isolated git worktree on branch %s; other workers handle other tasks on their own branches.
 Complete the task fully and stay within its scope. Run the project's relevant checks when you can.
 Do not run git add, git commit or git push: Seraph commits your changes on this branch when you finish.
+If the task asks you to push, merge or publish, do everything else and say so: Seraph's release step (an independent validator, then merge into the user's branch and push) does that part after you.
 End with a short summary of what changed.`
 
 const plannerPrompt = `You are the Seraph orchestrator. Split the goal below into 1-5 independent tasks that separate coding agents can do in parallel, each in its own git worktree branched from the current HEAD.
@@ -56,6 +57,7 @@ type SpawnOpts struct {
 	Shared    bool
 	Branch    string
 	Base      string
+	Role      string
 }
 
 const (
@@ -310,6 +312,7 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 		TodoID:    o.TodoID,
 		MissionID: o.MissionID,
 		NodeID:    o.NodeID,
+		Role:      o.Role,
 		Status:    store.StatusQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -513,6 +516,9 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		Approval:     agent.Approval(snapshot.Approval),
 		SystemPrompt: fmt.Sprintf(workerPrompt, branchOr(snapshot.Branch)),
 	}
+	if snapshot.Role == roleValidatorSession {
+		spec.SystemPrompt = roleRules + "\n" + roleIdentity[store.RoleValidator]
+	}
 	if snapshot.NodeID != "" {
 		sys, dirs := m.nodeSystem(snapshot)
 		spec.SystemPrompt = sys
@@ -583,6 +589,9 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		m.publish(id, true)
 		if snapshot.MissionID != "" && !ask {
 			m.nodeSessionEnded(snapshot)
+		}
+		if snapshot.Role == roleValidatorSession {
+			m.validationEnded(snapshot)
 		}
 	}()
 }

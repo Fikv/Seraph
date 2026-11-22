@@ -36,6 +36,7 @@ var roleIdentity = map[store.Role]string{
 	store.RoleReviewer:   "Your role: Code Reviewer with a fresh context. You did not write this code and you do not change it.",
 	store.RoleTester:     "Your role: Tester. You write and run tests against the acceptance criteria. You do not fix product code.",
 	store.RoleAcceptance: "Your role: Product Owner doing acceptance. You judge the result against the acceptance criteria; you do not change code.",
+	store.RoleValidator:  "Your role: Validator, the last gate before this work is merged and pushed. You did not do this work. You run checks; you never change files.",
 }
 
 var RoleNames = map[store.Role]string{
@@ -47,6 +48,7 @@ var RoleNames = map[store.Role]string{
 	store.RoleReviewer:     "Reviewer",
 	store.RoleTester:       "Tester",
 	store.RoleAcceptance:   "Acceptance",
+	store.RoleValidator:    "Validator",
 }
 
 type RoleConfig struct {
@@ -59,7 +61,7 @@ func roleKey(r store.Role) string { return "role:" + string(r) }
 
 func readOnlyRole(r store.Role) bool {
 	switch r {
-	case store.RoleDev, store.RoleTester:
+	case store.RoleDev, store.RoleTester, store.RoleValidator:
 		return false
 	}
 	return true
@@ -100,6 +102,8 @@ func (m *Manager) missionRole(missionID string, r store.Role) RoleConfig {
 		c = RoleConfig{Agent: firstNonEmpty(d.Agent, "claude"), Model: d.Model}
 	}
 	switch {
+	case r == store.RoleValidator:
+		c.Approval = agent.ApprovalCheck
 	case readOnlyRole(r):
 		c.Approval = agent.ApprovalReadOnly
 	case c.Approval == "" && d.Approval == agent.ApprovalYolo:
