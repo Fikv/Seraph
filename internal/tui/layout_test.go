@@ -285,3 +285,19 @@ func TestNotesAndDiffContent(t *testing.T) {
 		}
 	}
 }
+
+func TestSpinStarCycles(t *testing.T) {
+	seen := map[string]bool{}
+	for f := 0; f < len(spinFrames)*spinEvery; f++ {
+		seen[spinStar(f, false)] = true
+		if w := ansi.StringWidth(spinStar(f, true)); w != 1 {
+			t.Fatalf("frame %d is %d cells wide", f, w)
+		}
+	}
+	if len(seen) != 3 || spinStar(0, false) != "✦" || spinStar(2*spinEvery, false) != "✕" {
+		t.Fatalf("frames = %v", seen)
+	}
+	if spinStar(spinEvery, false) != spinStar(3*spinEvery, true) {
+		t.Fatal("right star should run the sequence backwards")
+	}
+}
