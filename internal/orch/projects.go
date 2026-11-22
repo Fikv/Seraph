@@ -98,35 +98,25 @@ func (m *Manager) Dispatch(todoID string, d Defaults) (string, error) {
 	if !claimed {
 		return "", errors.New("this todo is already being processed")
 	}
-	ag := firstNonEmpty(t.Agent, p.DefaultAgent, d.Agent, "claude")
-	model := ""
-	switch {
-	case t.Agent != "" && t.Model != "":
-		model = t.Model
-	case ag == d.Agent:
-		model = d.Model
-	}
 	task := t.Title
 	if b := strings.TrimSpace(t.Body); b != "" {
 		task += "\n\n" + b
 	}
-	id, err := m.Spawn(SpawnOpts{
-		Title: t.Title, Task: task, Agent: ag, Model: model, Approval: d.Approval,
-		Repo: repo, ProjectID: p.ID, TodoID: t.ID,
-	})
+	var devRole *RoleConfig
+	if t.Agent != "" {
+		devRole = &RoleConfig{Agent: t.Agent, Model: t.Model}
+	} else if p.DefaultAgent != "" && p.DefaultAgent != d.Agent {
+		devRole = &RoleConfig{Agent: p.DefaultAgent}
+	}
+	ms, err := m.StartMission(MissionOpts{Title: t.Title, Goal: task, Repo: repo, ProjectID: p.ID, TodoID: t.ID, Dev: devRole})
 	if err != nil {
 		t.Status, t.Note = TodoStatusBefore(t), "dispatch failed: "+err.Error()
 		_ = m.st.SaveTodo(t)
 		m.publish("todo:"+t.ID, true)
 		return "", err
 	}
-	t, _, _ = m.st.Todo(todoID)
-	t.Status, t.SessionID, t.Note = store.TodoDoing, id, ""
-	if err := m.st.SaveTodo(t); err != nil {
-		return id, err
-	}
 	m.publish("todo:"+t.ID, true)
-	return id, nil
+	return ms.ID, nil
 }
 
 func TodoStatusBefore(t store.Todo) store.TodoStatus {
@@ -240,6 +230,7 @@ func (m *Manager) StartScheduler(d Defaults) {
 }
 
 func (m *Manager) ScheduleOnce() []error {
+	m.tickMissions()
 	m.sched.mu.Lock()
 	d := m.sched.defaults
 	m.sched.mu.Unlock()
@@ -256,6 +247,15 @@ func (m *Manager) ScheduleOnce() []error {
 		}
 		running := 0
 		for _, t := range todos {
+			if t.Status != store.TodoDoing && t.Status != store.TodoReview {
+				continue
+			}
+			if ms, ok, _ := m.st.MissionForTodo(t.ID); ok {
+				if ms.Active() {
+					running++
+				}
+				continue
+			}
 			if t.Status != store.TodoDoing {
 				continue
 			}

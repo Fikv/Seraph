@@ -49,6 +49,8 @@ func (m *Model) screen() string {
 		return m.notesView()
 	case scrModels:
 		return m.overlay(m.modelPickerView())
+	case scrMissions:
+		return m.missionsView()
 	case scrDiff:
 		return m.diffView()
 	case scrTodos:
@@ -68,6 +70,13 @@ func (m *Model) header() string {
 	counts := sCyan.Render(fmt.Sprintf("⟡ %d", len(ls[laneFlight]))) + "  " +
 		sRose.Render(fmt.Sprintf("☩ %d", len(ls[laneNeeds]))) + "  " +
 		sGold.Render(fmt.Sprintf("✦ %d", len(ls[laneAscended])))
+	if active, waiting := m.activeMissions(); active > 0 {
+		mc := sLavender.Render(fmt.Sprintf("⟁ %d", active))
+		if waiting > 0 {
+			mc += sGold.Render(fmt.Sprintf(" ⏸%d", waiting))
+		}
+		counts = mc + "  " + counts
+	}
 	right := m.modelLabel() + sDim.Render(" · ") + approvalLabel(string(m.opt.Approval)) + sDim.Render("   ") + counts
 	if lipgloss.Width(right) > m.w/2 {
 		right = counts

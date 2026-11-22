@@ -117,6 +117,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case "menu":
 		m.scr = scrBoard
 		return m.handleKey(keyMsg(arg))
+	case "mission", "mnode", "role":
+		return m.missionClick(kind, arg)
 	case "mcptab", "mcp", "mcpres", "form", "formopt":
 		if m.mcp != nil {
 			return m.mcpClick(kind, arg)
@@ -175,6 +177,13 @@ func (m *Model) wheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.handleKey(keyMsg(dir))
+	case scrMissions:
+		if m.missions != nil && m.missions.mode == mmArtifact {
+			var cmd tea.Cmd
+			m.missions.vp, cmd = m.missions.vp.Update(msg)
+			return m, cmd
+		}
+		return m.handleKey(keyMsg(dir))
 	case scrBoard, scrPlanReview, scrMCP, scrProjects, scrTodos:
 		return m.handleKey(keyMsg(dir))
 	}
@@ -230,6 +239,7 @@ func (m *Model) menuItems() [][]menuItem {
 			{"o", "O", "notes", true},
 			{"v", "V", "diff", hasSel},
 			{"t", "T", "todo board", m.project != nil},
+			{"M", "M", "missions", true},
 			{"c", "C", "MCP servers", true},
 			{"s", "S", "start screen", true},
 			{"esc", "ESC", "close", true},

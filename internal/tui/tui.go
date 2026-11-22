@@ -40,6 +40,7 @@ const (
 	scrNotes
 	scrDiff
 	scrModels
+	scrMissions
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -128,6 +129,7 @@ type Model struct {
 	backTo         screen
 	notes          *notesState
 	picker         *modelPicker
+	missions       *missionsState
 	cursorModels   []agent.Model
 	catalogLoading bool
 	catalogErr     string
@@ -350,7 +352,7 @@ func (m *Model) modalWidth() int { return min(max(m.w-6, 30), 96) }
 func (m *Model) lanes() [laneCount][]store.Session {
 	var out [laneCount][]store.Session
 	for _, s := range m.mgr.Sessions() {
-		if m.project != nil && s.ProjectID != m.project.ID {
+		if (m.project != nil && s.ProjectID != m.project.ID) || s.MissionID != "" {
 			continue
 		}
 		l := laneOf(s)
@@ -418,6 +420,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.diffKey(k)
 	case scrModels:
 		return m.modelsKey(k)
+	case scrMissions:
+		return m.missionsKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -501,6 +505,8 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		m.restartSplash()
 	case "a":
 		return m, m.openModelPicker(scrBoard, m.setDefaultModel)
+	case "M":
+		return m, m.openMissions("")
 	case "y":
 		m.toggleApproval()
 	case "x":
@@ -581,6 +587,11 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case scrDiff:
 			m.scr = scrDiff
 			m.reloadDiff()
+		case scrMissions:
+			if m.missions != nil {
+				m.scr = scrMissions
+				m.reloadMissions(true)
+			}
 		}
 		m.backTo = scrBoard
 		return m, nil

@@ -48,6 +48,7 @@ const (
 	ApprovalYolo     Approval = "yolo"
 	ApprovalReadOnly Approval = "readonly"
 	ApprovalAsk      Approval = "ask"
+	ApprovalTest     Approval = "test"
 )
 
 type Spec struct {
@@ -228,4 +229,19 @@ func oneLine(s string, max int) string {
 		return string(r[:max-1]) + "…"
 	}
 	return s
+}
+
+var TestCommands = []string{
+	"go test", "go vet", "go build", "npm test", "npm run test", "npm run build", "npm run lint", "pnpm test", "pnpm run test",
+	"yarn test", "npx vitest", "npx jest", "npx tsc", "pytest", "python -m pytest", "python3 -m pytest", "cargo test",
+	"cargo build", "cargo check", "make test", "make check", "mvn test", "gradle test", "./gradlew test", "dotnet test",
+	"bundle exec rspec", "php artisan test", "git status", "git diff", "git log",
+}
+
+func testAllowedTools() string {
+	tools := []string{"Read", "Grep", "Glob", "Edit", "Write", "MultiEdit"}
+	for _, c := range TestCommands {
+		tools = append(tools, "Bash("+c+":*)")
+	}
+	return strings.Join(tools, ",")
 }

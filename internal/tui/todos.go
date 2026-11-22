@@ -188,6 +188,11 @@ func (m *Model) todosKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	msg := ""
 	switch key {
 	case "enter", "p":
+		if td.Status == store.TodoDoing || td.Status == store.TodoReview || td.Status == store.TodoDone {
+			if ms, ok, _ := m.mgr.Store().MissionForTodo(td.ID); ok {
+				return m, m.openMissions(ms.ID)
+			}
+		}
 		if td.Status == store.TodoDoing || td.Status == store.TodoReview {
 			if td.SessionID != "" {
 				if _, exists := m.mgr.Get(td.SessionID); exists {

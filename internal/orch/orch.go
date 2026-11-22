@@ -50,6 +50,12 @@ type SpawnOpts struct {
 	Dir       string
 	ProjectID string
 	TodoID    string
+	MissionID string
+	NodeID    string
+	FromRef   string
+	Shared    bool
+	Branch    string
+	Base      string
 }
 
 const (
@@ -76,6 +82,8 @@ type Manager struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	sched     scheduler
+	mmu       sync.Mutex
+	halting   bool
 }
 
 func New(st *store.Store, b *bus.Bus) (*Manager, error) {
@@ -280,6 +288,8 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 		Dir:       o.Dir,
 		ProjectID: o.ProjectID,
 		TodoID:    o.TodoID,
+		MissionID: o.MissionID,
+		NodeID:    o.NodeID,
 		Status:    store.StatusQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -287,9 +297,13 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 	if s.Title == "" {
 		s.Title = titleFrom(o.Task)
 	}
-	if o.Repo != "" {
-		s.Base = workspace.CurrentBranch(o.Repo)
-		dir, branch, err := workspace.Create(store.Home(), o.Repo, s.ID)
+	switch {
+	case o.Shared:
+		s.Branch, s.Base = o.Branch, o.Base
+	case o.Repo != "":
+		ref := firstNonEmpty(o.FromRef, "HEAD")
+		s.Base = firstNonEmpty(o.FromRef, workspace.CurrentBranch(o.Repo))
+		dir, branch, err := workspace.CreateFrom(store.Home(), o.Repo, s.ID, ref)
 		if err != nil {
 			return "", err
 		}
@@ -399,6 +413,7 @@ func (m *Manager) Stop(id string) {
 
 func (m *Manager) StopAll() {
 	m.mu.Lock()
+	m.halting = true
 	for _, c := range m.cancels {
 		c()
 	}
@@ -478,12 +493,17 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		Approval:     agent.Approval(snapshot.Approval),
 		SystemPrompt: fmt.Sprintf(workerPrompt, branchOr(snapshot.Branch)),
 	}
+	if snapshot.NodeID != "" {
+		sys, dirs := m.nodeSystem(snapshot)
+		spec.SystemPrompt = sys
+		spec.AddDirs = append(spec.AddDirs, dirs...)
+	}
 	if ask {
 		spec.Approval = agent.ApprovalAsk
 		spec.SystemPrompt = fmt.Sprintf(explainPrompt, branchOr(snapshot.Branch))
 	}
 	if dirs, extra := m.projectContext(snapshot.ProjectID); extra != "" {
-		spec.AddDirs = dirs
+		spec.AddDirs = append(spec.AddDirs, dirs...)
 		spec.SystemPrompt += "\n" + extra
 	}
 	if cfg, err := mcp.Load(m.st); err == nil {
@@ -501,7 +521,8 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 			}
 			m.record(id, ev)
 		})
-		if err == nil && !resultErr && snapshot.Worktree && !ask {
+		writes := snapshot.Worktree || (snapshot.MissionID != "" && snapshot.Branch != "" && spec.Approval != agent.ApprovalReadOnly)
+		if err == nil && !resultErr && writes && !ask {
 			m.commit(id, snapshot, prompt)
 		}
 
@@ -540,6 +561,9 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 			m.todoSessionEnded(snapshot.TodoID, id, snapshot.Status, snapshot.Error)
 		}
 		m.publish(id, true)
+		if snapshot.MissionID != "" && !ask {
+			m.nodeSessionEnded(snapshot)
+		}
 	}()
 }
 
