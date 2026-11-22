@@ -223,7 +223,7 @@ func (s Server) CursorJSON() map[string]any {
 
 func (s Server) CommandLine() string {
 	if s.Transport != TransportStdio {
-		return s.Transport + " " + s.URL
+		return s.Transport + " " + MaskURL(s.URL)
 	}
 	parts := append([]string{s.Command}, s.Args...)
 	for i, p := range parts {
