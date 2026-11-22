@@ -46,6 +46,8 @@ const (
 
 const continuePrompt = "Continue where you left off and finish the task."
 
+const TranscriptViewSetting = "transcript_view"
+
 type tickMsg time.Time
 
 type versionsMsg map[string]string
@@ -133,6 +135,7 @@ type Model struct {
 	missions       *missionsState
 	release        *releaseState
 	selectMode     bool
+	chatView       bool
 	permitSnooze   map[string]time.Time
 	permAt         time.Time
 	lastView       string
@@ -186,6 +189,7 @@ func newModel(mgr *orch.Manager, opt Options) *Model {
 	m := &Model{mgr: mgr, opt: opt, ta: ta, fi: fi, vp: viewport.New(80, 20)}
 	m.loadCurrentProject()
 	m.permitSnooze = map[string]time.Time{}
+	m.chatView = mgr.Store().Setting(TranscriptViewSetting) == "chat"
 	m.logoStyle = logoStyleFor(mgr.Store().Setting(LogoStyleSetting))
 	defer m.refreshStats()
 	if !opt.AgentSet {
@@ -605,7 +609,12 @@ func (m *Model) refreshDetail(force bool) {
 		evs, v := m.mgr.Log(m.openID)
 		ver = v
 		atBottom := m.vp.AtBottom() || force
-		m.vp.SetContent(renderTranscript(evs, s.Agent, m.vp.Width))
+		if m.chatView {
+			live := (s.Status == store.StatusWorking || s.Status == store.StatusQueued) && m.mgr.Active(s.ID)
+			m.vp.SetContent(renderChat(evs, s.Agent, m.vp.Width, live))
+		} else {
+			m.vp.SetContent(renderTranscript(evs, s.Agent, m.vp.Width))
+		}
 		if atBottom {
 			m.vp.GotoBottom()
 		}
@@ -653,6 +662,20 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.fi.SetValue("")
 		m.refreshDetail(true)
+		return m, nil
+	case "tab":
+		m.chatView = !m.chatView
+		v := "full"
+		if m.chatView {
+			v = "chat"
+		}
+		_ = m.mgr.Store().SetSetting(TranscriptViewSetting, v)
+		m.refreshDetail(true)
+		if m.chatView {
+			m.setFlash("conversation only: your messages and the agent's answers · tab shows thinking and tools", false)
+		} else {
+			m.setFlash("full transcript: thinking, tools and commits · tab hides them", false)
+		}
 		return m, nil
 	case "ctrl+t":
 		return m, m.toggleSelectMode()

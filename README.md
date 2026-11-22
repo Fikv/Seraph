@@ -88,7 +88,10 @@ agent is told not to work around it), `⏎` open the worker, `esc` later. Compou
 with a small MCP server (`seraph permit`); `cursor-agent` has no such hook, so there
 `confirm` behaves like `safe`.
 
-In a worker's window a bar bounces above the input while the agent works. `ctrl+t`
+In a worker's window a bar bounces above the input while the agent works. `tab`
+switches between the full transcript and the conversation only: your messages and the
+agent's final answers, with thinking, tool calls and progress notes folded into one
+"∴ N steps hidden" line (errors always show). The choice is remembered. `ctrl+t`
 releases the mouse so you can select text with your terminal (Shift+drag also works in
 Windows Terminal), and `ctrl+o` copies the agent's last answer to the clipboard.
 
