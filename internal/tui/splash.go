@@ -19,13 +19,10 @@ const (
 	revealDuration = 1100 * time.Millisecond
 	revealEnd      = 1.25
 	titleStart     = 550 * time.Millisecond
-	titleStep      = 55 * time.Millisecond
-	titleSettle    = 170 * time.Millisecond
 	tagStep        = 14 * time.Millisecond
 	lineStep       = 45 * time.Millisecond
 	bobPeriod      = 3200 * time.Millisecond
 	bobPad         = 2
-	splashTitle    = "S E R A P H"
 	splashTag      = "orchestrate the choir"
 	panelWidth     = 58
 )
@@ -43,7 +40,7 @@ func (m *Model) splashElapsed() time.Duration {
 }
 
 func titleDone() time.Duration {
-	return titleStart + time.Duration(len(splashTitle))*titleStep + titleSettle
+	return titleStart + emblemBuild
 }
 
 func (m *Model) tagDone() time.Duration {
@@ -65,30 +62,6 @@ func revealAt(el time.Duration) float64 {
 func bobAt(since time.Duration) int {
 	phase := float64(since%bobPeriod) / float64(bobPeriod) * 2 * math.Pi
 	return int(math.Round(1 + math.Sin(phase)))
-}
-
-func titleAt(el time.Duration, frame int) string {
-	glyphs := []string{"✧", "✦", "⟡", "⋆", "·"}
-	var b strings.Builder
-	for i, r := range splashTitle {
-		if r == ' ' {
-			b.WriteString("  ")
-			continue
-		}
-		appear := titleStart + time.Duration(i)*titleStep
-		switch {
-		case el < appear:
-			b.WriteString(" ")
-		case el < appear+titleSettle:
-			b.WriteString(sDim.Render(glyphs[(frame/2+i)%len(glyphs)]))
-		default:
-			b.WriteString(sGoldB.Render(string(r)))
-		}
-	}
-	if el >= titleDone() {
-		return sGold.Render(spinStar(frame, false)) + "  " + b.String() + "  " + sGold.Render(spinStar(frame, true))
-	}
-	return "   " + b.String() + "   "
 }
 
 func (m *Model) tagAt(el time.Duration) string {
@@ -177,7 +150,8 @@ func tildeHome(p string) string {
 }
 
 func (m *Model) panel(el time.Duration) []string {
-	out := []string{titleAt(el, m.frame), m.tagAt(el), ""}
+	out := emblem(el - titleStart)
+	out = append(out, m.tagAt(el), "")
 	for i, line := range m.panelLines() {
 		if el < m.tagDone()+time.Duration(i)*lineStep {
 			out = append(out, "")
