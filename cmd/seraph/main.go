@@ -129,6 +129,8 @@ func run(args []string) error {
 			return cmdDB()
 		case "permit":
 			return cmdPermit(args[1:])
+		case "team":
+			return cmdTeam(args[1:])
 		case "doctor":
 			return cmdDoctor()
 		case "models":

@@ -15,6 +15,7 @@ import (
 	"seraph/internal/bus"
 	"seraph/internal/mcp"
 	"seraph/internal/store"
+	"seraph/internal/team"
 	"seraph/internal/workspace"
 )
 
@@ -58,6 +59,10 @@ type SpawnOpts struct {
 	Branch    string
 	Base      string
 	Role      string
+	ID        string
+	ParentID  string
+	TeamID    string
+	AgentName string
 }
 
 const (
@@ -84,6 +89,7 @@ type Manager struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	sched     scheduler
+	tmu       sync.Mutex
 	mmu       sync.Mutex
 	halting   bool
 }
@@ -300,7 +306,7 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 	}
 	now := time.Now()
 	s := store.Session{
-		ID:        store.NewID(),
+		ID:        firstNonEmpty(o.ID, store.NewID()),
 		Title:     o.Title,
 		Task:      o.Task,
 		Agent:     o.Agent,
@@ -313,6 +319,9 @@ func (m *Manager) Spawn(o SpawnOpts) (string, error) {
 		MissionID: o.MissionID,
 		NodeID:    o.NodeID,
 		Role:      o.Role,
+		ParentID:  o.ParentID,
+		TeamID:    o.TeamID,
+		AgentName: o.AgentName,
 		Status:    store.StatusQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -519,6 +528,17 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 	if snapshot.Role == roleValidatorSession {
 		spec.SystemPrompt = roleRules + "\n" + roleIdentity[store.RoleValidator]
 	}
+	if snapshot.TeamID != "" {
+		sys, dirs, tools := m.teamSystem(snapshot)
+		spec.SystemPrompt = sys
+		spec.AddDirs = append(spec.AddDirs, dirs...)
+		if tools {
+			if exe, err := os.Executable(); err == nil {
+				spec.Team = []string{exe, "team", id}
+				spec.AllowTools = append(spec.AllowTools, team.ToolPrefix)
+			}
+		}
+	}
 	if snapshot.NodeID != "" {
 		sys, dirs := m.nodeSystem(snapshot)
 		spec.SystemPrompt = sys
@@ -536,7 +556,7 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		spec.ApproveMCPs = cfg.AnyCursor()
 	}
 	switch spec.Approval {
-	case agent.ApprovalSafe, agent.ApprovalTest, agent.ApprovalConfirm:
+	case agent.ApprovalSafe, agent.ApprovalTest, agent.ApprovalConfirm, agent.ApprovalYolo:
 		for _, n := range mcp.Trusted(m.st) {
 			spec.AllowTools = append(spec.AllowTools, mcp.ToolPattern(n))
 		}
@@ -604,6 +624,9 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		}
 		if snapshot.Role == roleValidatorSession {
 			m.validationEnded(snapshot)
+		}
+		if snapshot.TeamID != "" && !ask {
+			m.teamTurnEnded(snapshot)
 		}
 	}()
 }

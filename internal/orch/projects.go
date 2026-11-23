@@ -27,6 +27,7 @@ type Defaults struct {
 }
 
 type scheduler struct {
+	teamLoop bool
 	mu       sync.Mutex
 	defaults Defaults
 	running  bool
@@ -208,6 +209,7 @@ func (m *Manager) SetDefaults(d Defaults) {
 
 func (m *Manager) StartScheduler(d Defaults) {
 	m.SetDefaults(d)
+	m.StartTeamLoop()
 	m.sched.mu.Lock()
 	if m.sched.running {
 		m.sched.mu.Unlock()

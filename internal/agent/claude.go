@@ -23,7 +23,9 @@ func (Claude) Args(s Spec) []string {
 	switch s.Approval {
 	case ApprovalYolo:
 		args = append(args, "--permission-mode", "bypassPermissions")
-	case ApprovalReadOnly, ApprovalAsk:
+	case ApprovalReadOnly:
+		args = append(args, "--allowedTools", withAllowed("Read,Grep,Glob", s.AllowTools))
+	case ApprovalAsk:
 		args = append(args, "--allowedTools", "Read,Grep,Glob")
 	case ApprovalTest:
 		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", withAllowed(testAllowedTools(), s.AllowTools))
@@ -32,7 +34,7 @@ func (Claude) Args(s Spec) []string {
 	case ApprovalConfirm:
 		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", withAllowed(testAllowedTools(), s.AllowTools))
 		if len(s.Permit) > 0 {
-			args = append(args, "--mcp-config", permitConfig(s.Permit), "--permission-prompt-tool", PermitTool)
+			args = append(args, "--permission-prompt-tool", PermitTool)
 		}
 	default:
 		args = append(args, "--permission-mode", "acceptEdits")
@@ -42,6 +44,9 @@ func (Claude) Args(s Spec) []string {
 	}
 	for _, d := range s.AddDirs {
 		args = append(args, "--add-dir", d)
+	}
+	if cfg := mcpConfig(s); cfg != "" {
+		args = append(args, "--mcp-config", cfg)
 	}
 	args = append(args, "--settings", noAttribution)
 	if s.SystemPrompt != "" {
