@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type viewStats struct {
 	badges          map[string]string
 	permissions     []store.Permission
 	waitingFor      map[string]string
+	teams           map[string]string
 }
 
 func (m *Model) refreshStats() {
@@ -35,6 +37,16 @@ func (m *Model) refreshStats() {
 			}
 			if ms.State == store.MissionWaiting || ms.State == store.MissionBlocked {
 				s.waitingMissions++
+			}
+		}
+	}
+	s.teams = map[string]string{}
+	for _, x := range m.mgr.Sessions() {
+		if x.Role == "orchestrator" {
+			total, running := m.mgr.TeamStats(x.ID)
+			s.teams[x.ID] = fmt.Sprintf("⟁ %d agents", total)
+			if running > 0 {
+				s.teams[x.ID] += fmt.Sprintf(" (%d working)", running)
 			}
 		}
 	}

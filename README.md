@@ -44,6 +44,8 @@ seraph rm <id>               # remove worktree + record (branch kept)
 | `a` / `y` | model picker / approval mode (safe → confirm → yolo) |
 | `g` | projects: switch, create, edit, open notes in Obsidian |
 | `t` | the project todo board |
+| `N` | new orchestrator: a lead agent that delegates to its own team |
+| `T` / `ctrl+l` | the orchestrator's team tree |
 | `M` | missions: a team of agents per goal |
 | `w` | release the selected worker: validate, merge, push |
 | `m` | menu: keycap tiles for every action |
@@ -111,6 +113,24 @@ accepted mission) opens the release:
 
 Cards show where each worker stands: `✓ validated`, `✗ validation failed`, `⇢ merged`,
 `↑ pushed`. `R` on the missions screen sets the validator's model too.
+
+## Orchestrator: a lead with its own team
+
+`N` starts an **orchestrator**, a Claude agent you talk to that builds and runs its own team:
+
+- it creates subagents (`spawn_agent`), each in its own worktree branched from the
+  orchestrator's branch, read-only for research and review, with disjoint paths for
+  parallel writers; subagents may have helpers of their own (two levels in total)
+- it waits for them, reads their reports, merges their branches into its own and verifies
+  the result; if it goes idle while they work, Seraph wakes it with their reports
+- every agent sees the team tree and a shared notebook, `TEAM.md` in the project notes,
+  where the plan, decisions, spawns and merges are recorded; agents can message each other
+- for a big, well-defined feature it can start a mission (with your gates) and merge it later
+
+`T` on its card or `ctrl+l` in any team member's window shows the live tree: who works,
+on what model, and whether their work is merged. Release the orchestrator's branch with
+`w` as usual. The orchestrator runs on Claude Code; Cursor subagents get the team context
+in their prompt but not the team tools. The board (TUI) must be open while the team works.
 
 ## Missions: a team in a tree
 

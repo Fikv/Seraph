@@ -81,3 +81,8 @@ func Push(repo, branch string) (string, error) {
 	}
 	return out, nil
 }
+
+func IsAncestor(repo, ref, of string) bool {
+	_, err := git(repo, "merge-base", "--is-ancestor", ref, of)
+	return err == nil
+}

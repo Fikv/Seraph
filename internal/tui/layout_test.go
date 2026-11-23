@@ -106,6 +106,7 @@ func testModel(t *testing.T) *Model {
 	}
 	m.loadProjects()
 	seedMissions(t, st, notes, repo)
+	seedTeam(t, st, notes)
 	m.cursorModels = agent.ParseCursorModels("auto - Auto (default)\ngpt-5.3-codex-high - Codex 5.3 High\nclaude-opus-5-5-high - Claude Opus 5.5 1M High\ngemini-3.1-pro - Gemini 3.1 Pro\ngrok-4.7-high - Grok 4.7 High\nmuse-spark-1.3 - Muse Spark 1.3\nkimi-k3 - Kimi K3\nglm-5.2 - GLM 5.2\n" + strings.Repeat("x", 120) + " - " + strings.Repeat("Very long model name ", 8) + "\n")
 	st.SetSetting("limits:claude", `{"agent":"claude","windows":[{"window":"five_hour","utilization":0.62,"resets_at":"`+time.Now().Add(3*time.Hour).Format(time.RFC3339)+`"},{"window":"seven_day","utilization":0.91,"resets_at":"`+time.Now().Add(80*time.Hour).Format(time.RFC3339)+`"}],"captured":"`+time.Now().Format(time.RFC3339)+`"}`)
 
@@ -241,6 +242,10 @@ func TestLayoutFitsTerminal(t *testing.T) {
 		},
 		"detail-select": func(m *Model) { m.openDetail("s00000"); m.toggleSelectMode() },
 		"detail-chat":   func(m *Model) { m.openDetail("s00000"); m.handleKey(keyMsg("tab")) },
+		"team-tree":     func(m *Model) { m.openTeam("o00000", scrBoard); m.team.sel = 3 },
+		"team-notes":    func(m *Model) { m.openTeam("o00000", scrBoard); m.handleKey(keyMsg("n")) },
+		"team-compose":  func(m *Model) { m.scr = scrBoard; m.handleKey(keyMsg("N")); m.ta.SetValue(strings.Repeat("goal ", 40)) },
+		"team-detail":   func(m *Model) { m.openDetail("o00000") },
 		"todo-form-model": func(m *Model) {
 			p := m.projects[0]
 			m.useProject(&p)
@@ -249,8 +254,8 @@ func TestLayoutFitsTerminal(t *testing.T) {
 			m.todoForm.agent, m.todoForm.model = "cursor", "grok-4.7-high"
 		},
 	}
-	if len(screens) != 45 {
-		t.Fatalf("expected 45 screens under test, got %d", len(screens))
+	if len(screens) != 49 {
+		t.Fatalf("expected 49 screens under test, got %d", len(screens))
 	}
 	for _, sz := range sizes {
 		for name, set := range screens {
@@ -645,7 +650,7 @@ func TestReleaseScreen(t *testing.T) {
 		t.Fatal("esc closes the release")
 	}
 	for _, s := range m.mgr.Sessions() {
-		if s.Role != "" {
+		if s.Role == "validator" {
 			t.Fatal("fixture should not contain validator sessions")
 		}
 	}
@@ -835,5 +840,71 @@ func TestTrustAndWorkerMode(t *testing.T) {
 		if !strings.Contains(v, want) {
 			t.Errorf("MCP permission modal lacks %q", want)
 		}
+	}
+}
+
+func seedTeam(t *testing.T, st *store.Store, notes string) {
+	t.Helper()
+	dir := filepath.Join(notes, "Seraph Teams", "t")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "TEAM.md"), []byte("# Team notebook\n\n## Goal\n\nbuild "+strings.Repeat("things ", 50)+"\n\n### api · now\n\nAPI returns JSON.\n"), 0o644)
+	st.SetSetting("team_dir:o00000", dir)
+	now := time.Now()
+	for _, s := range []store.Session{
+		{ID: "o00000", TeamID: "o00000", Role: "orchestrator", Title: "Orchestrator: Build the shop " + strings.Repeat("and more ", 10), Agent: "claude", Model: "claude-opus-5-5", Status: store.StatusWorking, LastLine: "waiting for 2 agents", Cost: 0.42},
+		{ID: "a00000", TeamID: "o00000", ParentID: "o00000", AgentName: "api-dev", Role: "subagent", Title: "Developer: api-dev", Agent: "claude", Model: "claude-sonnet-5-5", Status: store.StatusWorking, LastLine: strings.Repeat("editing internal/api/handlers.go ", 6)},
+		{ID: "h00000", TeamID: "o00000", ParentID: "a00000", AgentName: "test-helper", Role: "subagent", Title: "Tester: test-helper", Agent: "claude", Status: store.StatusDone, LastLine: "tests pass"},
+		{ID: "u00000", TeamID: "o00000", ParentID: "o00000", AgentName: "ui-dev", Role: "subagent", Title: "Developer: ui-dev", Agent: "cursor", Model: "gpt-5.3-codex", Status: store.StatusFailed, Error: "exit status 1: " + strings.Repeat("boom ", 20)},
+		{ID: "s00009", TeamID: "o00000", ParentID: "o00000", AgentName: "scout", Role: "subagent", Title: "Analyst: scout", Agent: "claude", Model: "claude-haiku-5-5", Approval: "readonly", Status: store.StatusDone, LastLine: "mapped the code"},
+	} {
+		s.Task, s.Dir, s.CreatedAt, s.UpdatedAt = s.Title, "/tmp/x", now, now
+		if s.Approval == "" {
+			s.Approval = "safe"
+		}
+		if err := st.Save(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestTeamScreens(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h, m.scr = 140, 44, scrBoard
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "⟁ 4 agents") || strings.Contains(v, "api-dev") {
+		t.Fatalf("the board shows the orchestrator with its team size and hides subagents:\n%s", v)
+	}
+	m.openDetail("o00000")
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "⟁ orchestrator · 4 agents") || !strings.Contains(v, "team tree") {
+		t.Fatalf("the orchestrator window shows its team:\n%s", v)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+	if m.scr != scrTeam {
+		t.Fatal("ctrl+l opens the team tree")
+	}
+	v = ansi.Strip(m.View())
+	for _, want := range []string{"✧ orchestrator", "├─", "api-dev · developer", "└─", "test-helper", "ui-dev", "scout · analyst · read-only", "boom", "4 agents · "} {
+		if !strings.Contains(v, want) {
+			t.Errorf("team tree lacks %q:\n%s", want, v)
+		}
+	}
+	m.handleKey(keyMsg("down"))
+	m.handleKey(keyMsg("enter"))
+	if m.scr != scrDetail || m.openID != "a00000" {
+		t.Fatalf("enter opens the agent: %v %s", m.scr, m.openID)
+	}
+	m.handleKey(keyMsg("esc"))
+	if m.scr != scrTeam {
+		t.Fatal("esc from an agent returns to the tree")
+	}
+	m.handleKey(keyMsg("n"))
+	if !m.team.notes || !strings.Contains(ansi.Strip(m.View()), "API returns JSON") {
+		t.Fatal("n shows the team notebook")
+	}
+	m.handleKey(keyMsg("esc"))
+	m.handleKey(keyMsg("esc"))
+	if m.scr != scrDetail || m.openID != "o00000" {
+		t.Fatalf("esc returns to the orchestrator window: %v %s", m.scr, m.openID)
 	}
 }

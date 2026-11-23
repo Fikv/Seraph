@@ -52,6 +52,9 @@ type Session struct {
 	MissionID      string    `json:"mission_id,omitempty"`
 	NodeID         string    `json:"node_id,omitempty"`
 	Role           string    `json:"role,omitempty"`
+	ParentID       string    `json:"parent_id,omitempty"`
+	TeamID         string    `json:"team_id,omitempty"`
+	AgentName      string    `json:"agent_name,omitempty"`
 	OwnerPID       int       `json:"-"`
 	HeartbeatAt    time.Time `json:"-"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -237,6 +240,33 @@ var migrations = []string{
 		created_at INTEGER NOT NULL,
 		PRIMARY KEY (session_id, tool, prefix)
 	);`,
+	`ALTER TABLE sessions ADD COLUMN parent_id TEXT NOT NULL DEFAULT '';
+	ALTER TABLE sessions ADD COLUMN team_id TEXT NOT NULL DEFAULT '';
+	ALTER TABLE sessions ADD COLUMN agent_name TEXT NOT NULL DEFAULT '';
+	CREATE TABLE team_reported (session_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+	CREATE INDEX sessions_team ON sessions(team_id);
+	CREATE TABLE team_requests (
+		id TEXT PRIMARY KEY,
+		team_id TEXT NOT NULL,
+		from_session TEXT NOT NULL,
+		op TEXT NOT NULL,
+		args TEXT NOT NULL DEFAULT '{}',
+		status TEXT NOT NULL,
+		result TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE INDEX team_requests_pending ON team_requests(status, created_at);
+	CREATE TABLE team_messages (
+		id TEXT PRIMARY KEY,
+		team_id TEXT NOT NULL,
+		from_session TEXT NOT NULL,
+		to_session TEXT NOT NULL,
+		text TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		delivered_at INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX team_messages_to ON team_messages(to_session, delivered_at);`,
 }
 
 func Open() (*Store, error) {
@@ -314,11 +344,11 @@ func b2i(b bool) int {
 
 const sessionCols = `id, title, task, agent, model, approval, repo, dir, branch, base, worktree, status,
 	agent_session_id, cost, turns, last_line, error, owner_pid, heartbeat_at, created_at, updated_at, project_id, todo_id,
-	mission_id, node_id, role`
+	mission_id, node_id, role, parent_id, team_id, agent_name`
 
 func (s *Store) Save(sess Session) error {
 	_, err := s.db.Exec(`INSERT INTO sessions (`+sessionCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title=excluded.title, task=excluded.task, agent=excluded.agent, model=excluded.model,
 			approval=excluded.approval, repo=excluded.repo, dir=excluded.dir, branch=excluded.branch,
@@ -327,11 +357,12 @@ func (s *Store) Save(sess Session) error {
 			last_line=excluded.last_line, error=excluded.error, owner_pid=excluded.owner_pid,
 			heartbeat_at=excluded.heartbeat_at, updated_at=excluded.updated_at,
 			project_id=excluded.project_id, todo_id=excluded.todo_id,
-			mission_id=excluded.mission_id, node_id=excluded.node_id, role=excluded.role`,
+			mission_id=excluded.mission_id, node_id=excluded.node_id, role=excluded.role,
+			parent_id=excluded.parent_id, team_id=excluded.team_id, agent_name=excluded.agent_name`,
 		sess.ID, sess.Title, sess.Task, sess.Agent, sess.Model, sess.Approval, sess.Repo, sess.Dir,
 		sess.Branch, sess.Base, b2i(sess.Worktree), string(sess.Status), sess.AgentSessionID, sess.Cost,
 		sess.Turns, sess.LastLine, sess.Error, sess.OwnerPID, ms(sess.HeartbeatAt), ms(sess.CreatedAt), ms(sess.UpdatedAt),
-		sess.ProjectID, sess.TodoID, sess.MissionID, sess.NodeID, sess.Role)
+		sess.ProjectID, sess.TodoID, sess.MissionID, sess.NodeID, sess.Role, sess.ParentID, sess.TeamID, sess.AgentName)
 	return err
 }
 
@@ -345,7 +376,7 @@ func scanSession(r scanner) (Session, error) {
 	err := r.Scan(&sess.ID, &sess.Title, &sess.Task, &sess.Agent, &sess.Model, &sess.Approval, &sess.Repo,
 		&sess.Dir, &sess.Branch, &sess.Base, &worktree, &status, &sess.AgentSessionID, &sess.Cost, &sess.Turns,
 		&sess.LastLine, &sess.Error, &sess.OwnerPID, &hb, &created, &updated, &sess.ProjectID, &sess.TodoID,
-		&sess.MissionID, &sess.NodeID, &sess.Role)
+		&sess.MissionID, &sess.NodeID, &sess.Role, &sess.ParentID, &sess.TeamID, &sess.AgentName)
 	sess.Status = Status(status)
 	sess.Worktree = worktree != 0
 	sess.HeartbeatAt, sess.CreatedAt, sess.UpdatedAt = fromMS(hb), fromMS(created), fromMS(updated)

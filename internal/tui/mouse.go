@@ -123,6 +123,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case "menu":
 		m.scr = scrBoard
 		return m.handleKey(keyMsg(arg))
+	case "tnode":
+		return m.teamClick(arg)
 	case "mission", "mnode", "role":
 		return m.missionClick(kind, arg)
 	case "mcptab", "mcp", "mcpres", "form", "formopt":
@@ -181,6 +183,13 @@ func (m *Model) wheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.diff.scroll += 3
 			}
 			return m, nil
+		}
+		return m.handleKey(keyMsg(dir))
+	case scrTeam:
+		if m.team != nil && m.team.notes {
+			var cmd tea.Cmd
+			m.team.vp, cmd = m.team.vp.Update(msg)
+			return m, cmd
 		}
 		return m.handleKey(keyMsg(dir))
 	case scrMissions:
@@ -252,6 +261,7 @@ func (m *Model) menuItems() [][]menuItem {
 			{"v", "V", "diff", hasSel},
 			{"t", "T", "todo board", m.project != nil},
 			{"M", "M", "missions", true},
+			{"N", "N", "orchestrator", m.spawnRepo() != ""},
 			{"w", "W", "release", hasSel},
 			{"c", "C", "MCP servers", true},
 			{"s", "S", "start screen", true},

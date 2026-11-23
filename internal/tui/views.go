@@ -40,6 +40,9 @@ func (m *Model) screen() string {
 	case scrDetail:
 		return m.detailView()
 	case scrNew:
+		if m.composeTeam {
+			return m.overlay(m.composeView("⟁ NEW ORCHESTRATOR · a lead that builds and runs its own team", "start"))
+		}
 		return m.overlay(m.composeView("☩ SUMMON A WORKER", "summon"))
 	case scrPlanGoal:
 		return m.overlay(m.composeView("✦ DIVINE A PLAN", "plan"))
@@ -63,6 +66,8 @@ func (m *Model) screen() string {
 		return m.missionsView()
 	case scrRelease:
 		return m.releaseView()
+	case scrTeam:
+		return m.teamView()
 	case scrDiff:
 		return m.diffView()
 	case scrTodos:
@@ -205,7 +210,7 @@ func (m *Model) card(s store.Session, w int, selected bool, laneColor t.RGB) str
 	if s.Status == store.StatusWorking || s.Status == store.StatusQueued {
 		spin = (m.frame/3)%len(sparkle) + 1
 	}
-	ck := fmt.Sprintf("%s|%s|%s|%d|%s|%s|%s|%s|%.4f|%s|%s|%s|%d|%t|%t|%v|%d", m.stats.waitingFor[s.ID], m.stats.badges[s.ID], s.ID, s.UpdatedAt.UnixNano(), s.Status, s.Title, s.LastLine, s.Error,
+	ck := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s|%s|%.4f|%s|%s|%s|%d|%t|%t|%v|%d", m.stats.teams[s.ID], m.stats.waitingFor[s.ID], m.stats.badges[s.ID], s.ID, s.UpdatedAt.UnixNano(), s.Status, s.Title, s.LastLine, s.Error,
 		s.Cost, s.Branch, s.Approval, s.Agent, w, selected, m.hover == "card:"+s.ID, laneColor, spin)
 	if box, ok := m.cardMemo[ck]; ok {
 		return m.mark("card:"+s.ID, box)
@@ -247,6 +252,9 @@ func (m *Model) renderCard(s store.Session, w int, selected bool, laneColor t.RG
 	meta := s.ID
 	if b := m.stats.badges[s.ID]; b != "" {
 		meta += " · " + b
+	}
+	if t := m.stats.teams[s.ID]; t != "" {
+		meta += " · " + t
 	}
 	if s.Branch != "" {
 		meta += " · " + s.Branch
@@ -295,12 +303,16 @@ func (m *Model) detailView() string {
 	if m.chatView {
 		info1 += "  " + sFaint.Render("☰ conversation only")
 	}
+
 	where := sDim.Render("dir ") + sDim.Render(s.Dir)
 	if s.Branch != "" {
 		where = sDim.Render("branch ") + sLavender.Render(s.Branch) + sDim.Render(" off "+orDefault(s.Base, "HEAD")) + sDim.Render("  ·  ") + sMint.Render(orDefault(m.wsSummary, "…")) + sDim.Render("  ·  ") + sFaint.Render(s.Dir)
 	}
 	if s.Cost > 0 {
 		where += sDim.Render("  ·  ") + sGold.Render(fmt.Sprintf("$%.3f", s.Cost))
+	}
+	if tl := m.teamLine(s); tl != "" {
+		where = tl + sDim.Render("  ·  ") + where
 	}
 	info3 := m.flashLine()
 	if info3 == "" && s.Error != "" && s.Status != store.StatusWorking {

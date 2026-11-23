@@ -126,9 +126,23 @@ func TestTrustedMCPTools(t *testing.T) {
 			t.Errorf("%s must allow trusted MCP servers: %s", a, joined)
 		}
 	}
-	for _, a := range []Approval{ApprovalReadOnly, ApprovalCheck, ApprovalAsk} {
+	for _, a := range []Approval{ApprovalCheck, ApprovalAsk} {
 		if strings.Contains(strings.Join(Claude{}.Args(Spec{Prompt: "p", Approval: a, AllowTools: []string{"mcp__penpot"}}), " "), "mcp__penpot") {
 			t.Errorf("%s is read-only and must not get MCP write tools", a)
 		}
+	}
+}
+
+func TestTeamMCPConfig(t *testing.T) {
+	args := Claude{}.Args(Spec{Prompt: "p", Approval: ApprovalReadOnly, Team: []string{"/bin/seraph", "team", "s1"}, AllowTools: []string{"mcp__seraph_team"}})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{`"seraph_team":{"args":["team","s1"],"command":"/bin/seraph"}`, "Read,Grep,Glob,mcp__seraph_team"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args lack %q: %s", want, joined)
+		}
+	}
+	both := strings.Join(Claude{}.Args(Spec{Prompt: "p", Approval: ApprovalConfirm, Permit: []string{"/s", "permit", "x"}, Team: []string{"/s", "team", "x"}}), " ")
+	if strings.Count(both, "--mcp-config") != 1 || !strings.Contains(both, "seraph_permit") || !strings.Contains(both, "seraph_team") {
+		t.Fatalf("permit and team servers share one --mcp-config: %s", both)
 	}
 }

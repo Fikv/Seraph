@@ -42,6 +42,7 @@ const (
 	scrModels
 	scrMissions
 	scrRelease
+	scrTeam
 )
 
 const continuePrompt = "Continue where you left off and finish the task."
@@ -134,6 +135,8 @@ type Model struct {
 	picker         *modelPicker
 	missions       *missionsState
 	release        *releaseState
+	team           *teamState
+	composeTeam    bool
 	selectMode     bool
 	chatView       bool
 	permitSnooze   map[string]time.Time
@@ -388,7 +391,7 @@ func (m *Model) modalWidth() int { return min(max(m.w-6, 30), 96) }
 func (m *Model) lanes() [laneCount][]store.Session {
 	var out [laneCount][]store.Session
 	for _, s := range m.mgr.Sessions() {
-		if (m.project != nil && s.ProjectID != m.project.ID) || s.MissionID != "" || s.Role != "" {
+		if (m.project != nil && s.ProjectID != m.project.ID) || s.MissionID != "" || (s.Role != "" && s.Role != "orchestrator") {
 			continue
 		}
 		l := laneOf(s)
@@ -460,6 +463,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.missionsKey(k)
 	case scrRelease:
 		return m.releaseKey(k)
+	case scrTeam:
+		return m.teamKey(k)
 	case scrConfirm:
 		switch key {
 		case "y", "Y":
@@ -511,7 +516,7 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 	case "n":
-		m.scr = scrNew
+		m.scr, m.composeTeam = scrNew, false
 		m.ta.Reset()
 		m.ta.Placeholder = "describe the task for your worker…"
 		return m, m.ta.Focus()
@@ -545,6 +550,19 @@ func (m *Model) boardKey(key string) (tea.Model, tea.Cmd) {
 		return m, m.openModelPicker(scrBoard, m.setDefaultModel)
 	case "M":
 		return m, m.openMissions("")
+	case "N":
+		if m.spawnRepo() == "" {
+			m.setFlash("an orchestrator needs a git repository: run seraph inside one or add one to the project", true)
+			return m, nil
+		}
+		m.scr, m.composeTeam = scrNew, true
+		m.ta.Reset()
+		m.ta.Placeholder = "what should the team achieve? the orchestrator plans it, delegates to subagents and reports back…"
+		return m, m.ta.Focus()
+	case "T":
+		if s, ok := m.selected(); ok && s.TeamID != "" {
+			return m, m.openTeam(s.TeamID, scrBoard)
+		}
 	case "w":
 		if s, ok := m.selected(); ok {
 			return m, m.openRelease(store.TargetSession, s.ID, scrBoard)
@@ -648,6 +666,11 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.scr = scrMissions
 				m.reloadMissions(true)
 			}
+		case scrTeam:
+			if m.team != nil {
+				m.scr = scrTeam
+				m.reloadTeam(true)
+			}
 		}
 		m.backTo = scrBoard
 		return m, restore
@@ -697,6 +720,12 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			agent.ApprovalSafe: "commands and MCP tools that need permission are refused", agent.ApprovalConfirm: "it asks you before commands and MCP tools",
 			agent.ApprovalYolo: "it may run anything in its worktree"}[next], next == agent.ApprovalYolo)
 		return m, nil
+	case "ctrl+l":
+		if s, ok := m.mgr.Get(m.openID); ok && s.TeamID != "" {
+			m.fi.Blur()
+			return m, m.openTeam(s.TeamID, scrDetail)
+		}
+		return m, nil
 	case "ctrl+t":
 		return m, m.toggleSelectMode()
 	case "ctrl+o":
@@ -735,6 +764,7 @@ func (m *Model) composeKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.ta.Blur()
 		m.scr = scrBoard
+		m.composeTeam = false
 		return m, nil
 	case "tab":
 		back := m.scr
@@ -754,6 +784,22 @@ func (m *Model) composeKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ta.Blur()
 		if m.scr == scrPlanGoal {
 			return m, m.startPlan(text)
+		}
+		if m.composeTeam {
+			m.composeTeam = false
+			ag, model := m.opt.Agent, m.opt.Model
+			if ag != "claude" {
+				ag, model = "claude", ""
+			}
+			id, err := m.mgr.StartTeam(orch.TeamOpts{Goal: text, Repo: m.spawnRepo(), Dir: m.opt.Dir, ProjectID: m.projectID(), Agent: ag, Model: model, Approval: m.opt.Approval})
+			m.scr = scrBoard
+			if err != nil {
+				m.setFlash("orchestrator failed: "+err.Error(), true)
+				return m, nil
+			}
+			m.openDetail(id)
+			m.setFlash("orchestrator "+id+" is planning · ctrl+l shows its team as it grows", false)
+			return m, textinput.Blink
 		}
 		id, err := m.mgr.Spawn(orch.SpawnOpts{
 			Task: text, Agent: m.opt.Agent, Model: m.opt.Model,

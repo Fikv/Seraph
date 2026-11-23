@@ -129,6 +129,7 @@ type MissionOpts struct {
 	ProjectID string
 	TodoID    string
 	Dev       *RoleConfig
+	FromRef   string
 }
 
 func missionRoleKey(missionID string, r store.Role) string {
@@ -150,11 +151,11 @@ func (m *Manager) StartMission(o MissionOpts) (store.Mission, error) {
 		Title:     firstNonEmpty(o.Title, titleFrom(o.Goal)),
 		Goal:      strings.TrimSpace(o.Goal),
 		Repo:      repo,
-		Base:      workspace.CurrentBranch(repo),
+		Base:      firstNonEmpty(o.FromRef, workspace.CurrentBranch(repo)),
 		Phase:     store.PhaseSpec,
 		State:     store.MissionRunning,
 	}
-	dir, branch, err := workspace.CreateFrom(store.Home(), repo, "m-"+ms.ID, "HEAD")
+	dir, branch, err := workspace.CreateFrom(store.Home(), repo, "m-"+ms.ID, firstNonEmpty(o.FromRef, "HEAD"))
 	if err != nil {
 		return store.Mission{}, err
 	}

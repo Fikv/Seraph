@@ -64,6 +64,7 @@ type Spec struct {
 	ApproveMCPs  bool
 	AddDirs      []string
 	Permit       []string
+	Team         []string
 	AllowTools   []string
 }
 
@@ -78,10 +79,18 @@ func withAllowed(base string, extra []string) string {
 
 const PermitTool = "mcp__seraph_permit__approve"
 
-func permitConfig(cmd []string) string {
-	b, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
-		"seraph_permit": map[string]any{"command": cmd[0], "args": cmd[1:]},
-	}})
+func mcpConfig(s Spec) string {
+	servers := map[string]any{}
+	if len(s.Permit) > 0 {
+		servers["seraph_permit"] = map[string]any{"command": s.Permit[0], "args": s.Permit[1:]}
+	}
+	if len(s.Team) > 0 {
+		servers["seraph_team"] = map[string]any{"command": s.Team[0], "args": s.Team[1:]}
+	}
+	if len(servers) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(map[string]any{"mcpServers": servers})
 	return string(b)
 }
 
