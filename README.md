@@ -231,6 +231,12 @@ share it with the other agent (`seraph mcp import <name>|all` on the command lin
 Claude's *local* (per-directory) servers are flagged, because workers run in worktrees and
 do not load them until you add them to the user scope. Tokens in URLs are always masked.
 
+Agents in `safe` mode cannot use MCP tools that need permission (Claude refuses them in
+headless mode). Either run the worker in `confirm` mode so it asks you, or press `a` on a
+server to **trust** it (`seraph mcp trust <name>`): workers then use all of its tools without
+asking. Read-only roles never get them. `ctrl+y` in a worker's window changes that
+worker's mode for its next message.
+
 ## Storage
 
 Everything Seraph knows lives in **SQLite** at `~/.seraph/seraph.db` (WAL mode, file mode 0600):

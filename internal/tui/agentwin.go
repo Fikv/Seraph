@@ -132,7 +132,13 @@ func (m *Model) permissionView(p store.Permission) string {
 	what := p.Summary()
 	var body []string
 	body = append(body, sDim.Render("worker ")+who, "")
-	body = append(body, sGoldB.Render(p.Tool)+sDim.Render(" wants to run:"))
+	toolLabel := p.Tool
+	if strings.HasPrefix(p.Tool, "mcp__") {
+		if parts := strings.SplitN(strings.TrimPrefix(p.Tool, "mcp__"), "__", 2); len(parts) == 2 {
+			toolLabel = "MCP " + parts[0] + " · " + parts[1]
+		}
+	}
+	body = append(body, sGoldB.Render(toolLabel)+sDim.Render(" wants to run:"))
 	for _, l := range strings.Split(what, "\n") {
 		for len([]rune(l)) > w-4 {
 			body = append(body, "  "+sIvory.Render(string([]rune(l)[:w-4])))
@@ -143,9 +149,12 @@ func (m *Model) permissionView(p store.Permission) string {
 	if d, ok := p.Input["description"].(string); ok && d != "" {
 		body = append(body, "", sFaint.Render(trunc("why: "+d, w)))
 	}
-	always := "always allow " + p.Tool + " in this worker"
+	always := "always allow " + toolLabel + " in this worker"
 	if p.Tool == "Bash" {
 		always = "always allow `" + store.CommandPrefix(p.Command()) + " …` in this worker"
+	}
+	if strings.HasPrefix(p.Tool, "mcp__") {
+		body = append(body, sFaint.Render(trunc("trust the whole server on the MCP screen (c → a) to stop these questions", w)))
 	}
 	body = fitLines(body, 0, max(m.h-12, 5))
 	more := ""

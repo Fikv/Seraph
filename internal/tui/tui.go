@@ -677,6 +677,26 @@ func (m *Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setFlash("full transcript: thinking, tools and commits · tab hides them", false)
 		}
 		return m, nil
+	case "ctrl+y":
+		s, ok := m.mgr.Get(m.openID)
+		if !ok {
+			return m, nil
+		}
+		next := map[string]agent.Approval{"safe": agent.ApprovalConfirm, "confirm": agent.ApprovalYolo, "yolo": agent.ApprovalSafe}[s.Approval]
+		if next == "" {
+			next = agent.ApprovalConfirm
+		}
+		if next == agent.ApprovalYolo && !s.Worktree {
+			next = agent.ApprovalSafe
+		}
+		if err := m.mgr.SetApproval(m.openID, next); err != nil {
+			m.setFlash(err.Error(), true)
+			return m, nil
+		}
+		m.setFlash("this worker now runs in "+string(next)+" mode from its next message · "+map[agent.Approval]string{
+			agent.ApprovalSafe: "commands and MCP tools that need permission are refused", agent.ApprovalConfirm: "it asks you before commands and MCP tools",
+			agent.ApprovalYolo: "it may run anything in its worktree"}[next], next == agent.ApprovalYolo)
+		return m, nil
 	case "ctrl+t":
 		return m, m.toggleSelectMode()
 	case "ctrl+o":

@@ -118,3 +118,17 @@ func TestConfirmModeWiresPermitTool(t *testing.T) {
 		t.Fatal("cursor confirm must not force")
 	}
 }
+
+func TestTrustedMCPTools(t *testing.T) {
+	for _, a := range []Approval{ApprovalSafe, ApprovalTest, ApprovalConfirm} {
+		joined := strings.Join(Claude{}.Args(Spec{Prompt: "p", Approval: a, AllowTools: []string{"mcp__penpot"}}), " ")
+		if !strings.Contains(joined, "mcp__penpot") {
+			t.Errorf("%s must allow trusted MCP servers: %s", a, joined)
+		}
+	}
+	for _, a := range []Approval{ApprovalReadOnly, ApprovalCheck, ApprovalAsk} {
+		if strings.Contains(strings.Join(Claude{}.Args(Spec{Prompt: "p", Approval: a, AllowTools: []string{"mcp__penpot"}}), " "), "mcp__penpot") {
+			t.Errorf("%s is read-only and must not get MCP write tools", a)
+		}
+	}
+}
