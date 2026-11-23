@@ -240,3 +240,46 @@ func nonNil(a []string) []string {
 	}
 	return a
 }
+
+const TrustedSetting = "mcp_trusted"
+
+func Trusted(st *store.Store) []string {
+	var names []string
+	_ = json.Unmarshal([]byte(st.Setting(TrustedSetting)), &names)
+	sort.Strings(names)
+	return names
+}
+
+func IsTrusted(st *store.Store, name string) bool {
+	for _, n := range Trusted(st) {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+func SetTrusted(st *store.Store, name string, on bool) error {
+	set := map[string]bool{}
+	for _, n := range Trusted(st) {
+		set[n] = true
+	}
+	if on {
+		set[name] = true
+	} else {
+		delete(set, name)
+	}
+	names := []string{}
+	for n := range set {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	b, _ := json.Marshal(names)
+	return st.SetSetting(TrustedSetting, string(b))
+}
+
+var toolNameUnsafe = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+
+func ToolPattern(server string) string {
+	return "mcp__" + toolNameUnsafe.ReplaceAllString(server, "_")
+}

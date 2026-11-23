@@ -36,7 +36,7 @@ func (p Permission) Command() string {
 }
 
 func (p Permission) Summary() string {
-	for _, k := range []string{"command", "file_path", "path", "url", "pattern"} {
+	for _, k := range []string{"command", "file_path", "path", "url", "pattern", "code", "query", "script", "sql"} {
 		if v, ok := p.Input[k].(string); ok && v != "" {
 			return v
 		}

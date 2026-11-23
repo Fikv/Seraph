@@ -18,6 +18,7 @@ const mcpUsage = `usage:
   seraph mcp add <registry-name> [-name n] [-option i] [-e KEY=VALUE]... [-no-claude] [-no-cursor]
   seraph mcp test <name>
   seraph mcp import <name>|all   (take over servers added in Claude Code or Cursor)
+  seraph mcp trust|untrust <name> (workers use its tools without asking)
   seraph mcp rm <name>`
 
 type multiFlag []string
@@ -60,6 +61,15 @@ func cmdMCP(args []string) error {
 			return err
 		}
 		printServer(*s)
+		return nil
+	case "trust", "untrust":
+		if len(args) < 2 {
+			return errors.New(mcpUsage)
+		}
+		if err := mcp.SetTrusted(stg.st, args[1], args[0] == "trust"); err != nil {
+			return err
+		}
+		fmt.Println(t.FG(t.Gold).Render("⚡ ") + args[1] + t.FG(t.Dim).Render(map[bool]string{true: " trusted: workers use " + mcp.ToolPattern(args[1]) + "__* without asking", false: " untrusted"}[args[0] == "trust"]))
 		return nil
 	case "import":
 		if len(args) < 2 {

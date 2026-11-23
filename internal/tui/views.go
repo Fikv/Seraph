@@ -290,7 +290,8 @@ func (m *Model) detailView() string {
 	if !ok {
 		return m.boardView()
 	}
-	info1 := agentLabel(s.Agent) + "  " + sTitle.Render(trunc(s.Title, m.w/2)) + "  " + statusPill(s.Status, m.frame)
+	info1 := agentLabel(s.Agent) + "  " + sTitle.Render(trunc(s.Title, m.w/2)) + "  " + statusPill(s.Status, m.frame) + "  " +
+		m.mark("key:ctrl+y", approvalLabel(orDefault(s.Approval, "safe")))
 	if m.chatView {
 		info1 += "  " + sFaint.Render("☰ conversation only")
 	}
@@ -315,7 +316,7 @@ func (m *Model) detailView() string {
 		viewLabel = "show thinking"
 	}
 	keys := hints(m.w, m.chip("enter", "⏎", "send"), m.chip("esc", "esc", "back"), m.chip("tab", "tab", viewLabel), m.chip("ctrl+t", "ctrl+t", selLabel), m.chip("ctrl+o", "ctrl+o", "copy answer"),
-		m.chip("ctrl+g", "ctrl+g", "diff"), key("↑↓ wheel", "scroll"), m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
+		m.chip("ctrl+y", "ctrl+y", "mode"), m.chip("ctrl+g", "ctrl+g", "diff"), key("↑↓ wheel", "scroll"), m.chip("ctrl+x", "ctrl+x", "stop"), m.chip("ctrl+r", "ctrl+r", "resume"))
 	if m.selectMode {
 		keys = hints(m.w, sGold.Render("✂ SELECT MODE"), sDim.Render("drag to select, ctrl+shift+c copies"), m.chip("ctrl+t", "ctrl+t", "mouse back"))
 	}

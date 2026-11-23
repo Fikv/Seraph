@@ -535,6 +535,12 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 	if cfg, err := mcp.Load(m.st); err == nil {
 		spec.ApproveMCPs = cfg.AnyCursor()
 	}
+	switch spec.Approval {
+	case agent.ApprovalSafe, agent.ApprovalTest, agent.ApprovalConfirm:
+		for _, n := range mcp.Trusted(m.st) {
+			spec.AllowTools = append(spec.AllowTools, mcp.ToolPattern(n))
+		}
+	}
 	if spec.Approval == agent.ApprovalConfirm {
 		if exe, err := os.Executable(); err == nil {
 			spec.Permit = []string{exe, "permit", id}
@@ -837,5 +843,29 @@ func (m *Manager) DecidePermission(id string, allow, always bool, message string
 		return errors.New("this request was already answered or expired")
 	}
 	m.publish(p.SessionID, true)
+	return err
+}
+
+func (m *Manager) SetApproval(id string, a agent.Approval) error {
+	m.mu.Lock()
+	s, ok := m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("no session %s", id)
+	}
+	if _, running := m.cancels[id]; running {
+		m.mu.Unlock()
+		return errors.New("the worker is running: change its mode when it stops")
+	}
+	if a == agent.ApprovalYolo && !s.Worktree {
+		m.mu.Unlock()
+		return errors.New("yolo needs a worktree; this worker shares a directory")
+	}
+	s.Approval = string(a)
+	s.UpdatedAt = time.Now()
+	snapshot := *s
+	m.mu.Unlock()
+	err := m.st.Save(snapshot)
+	m.publish(id, true)
 	return err
 }

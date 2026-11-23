@@ -26,16 +26,19 @@ func (Claude) Args(s Spec) []string {
 	case ApprovalReadOnly, ApprovalAsk:
 		args = append(args, "--allowedTools", "Read,Grep,Glob")
 	case ApprovalTest:
-		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", testAllowedTools())
+		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", withAllowed(testAllowedTools(), s.AllowTools))
 	case ApprovalCheck:
 		args = append(args, "--allowedTools", checkAllowedTools())
 	case ApprovalConfirm:
-		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", testAllowedTools())
+		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", withAllowed(testAllowedTools(), s.AllowTools))
 		if len(s.Permit) > 0 {
 			args = append(args, "--mcp-config", permitConfig(s.Permit), "--permission-prompt-tool", PermitTool)
 		}
 	default:
 		args = append(args, "--permission-mode", "acceptEdits")
+		if len(s.AllowTools) > 0 {
+			args = append(args, "--allowedTools", withAllowed("", s.AllowTools))
+		}
 	}
 	for _, d := range s.AddDirs {
 		args = append(args, "--add-dir", d)

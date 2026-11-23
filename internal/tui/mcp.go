@@ -259,6 +259,9 @@ func (m *Model) mcpInstalledKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
+	case "a":
+		m.toggleTrust(s.Name)
+		return m, nil
 	case "t", "enter":
 		st.busy[s.Name] = "testing"
 		return m, runCmd(s, "test")
@@ -575,7 +578,7 @@ func (m *Model) mcpView() string {
 	var keys string
 	if st.tab == 0 {
 		body = m.mcpInstalledView(bodyH)
-		keys = hints(m.w, m.chip("t", "t", "test"), m.chip("1", "1", "claude"), m.chip("2", "2", "cursor"),
+		keys = hints(m.w, m.chip("t", "t", "test"), m.chip("a", "a", "trust"), m.chip("1", "1", "claude"), m.chip("2", "2", "cursor"),
 			m.chip("d", "d", "remove"), m.chip("tab", "tab", "browse"), m.chip("esc", "esc", "back"))
 	} else {
 		body = m.mcpBrowseView(bodyH)
@@ -605,7 +608,11 @@ func (m *Model) mcpInstalledView(h int) string {
 		} else if m.hover == fmt.Sprintf("mcp:%d", i) {
 			nameStyle = sLavender
 		}
-		line := cursor + nameStyle.Render(fmt.Sprintf("%-*s", listW-26, trunc(s.Name, listW-26))) + " " +
+		name := trunc(s.Name, listW-26)
+		if mcp.IsTrusted(m.mgr.Store(), s.Name) {
+			name = trunc(s.Name, listW-29) + " ⚡"
+		}
+		line := cursor + nameStyle.Render(fmt.Sprintf("%-*s", listW-26, name)) + " " +
 			targetBadges(s.Claude, s.Cursor) + "  " + statusBadge(s, st.busy[s.Name], m.frame)
 		rows = append(rows, m.mark(fmt.Sprintf("mcp:%d", i), line))
 	}
@@ -634,7 +641,11 @@ func (m *Model) mcpInstalledView(h int) string {
 			if e.Scope == "local" {
 				where += sRose.Render(" local")
 			}
-			line := cursor + nameStyle.Render(fmt.Sprintf("%-*s", max(listW-30, 8), trunc(e.Name, max(listW-30, 8)))) + " " + where + "  " + status
+			name := trunc(e.Name, max(listW-30, 8))
+			if mcp.IsTrusted(m.mgr.Store(), e.Name) {
+				name = trunc(e.Name, max(listW-33, 5)) + " ⚡"
+			}
+			line := cursor + nameStyle.Render(fmt.Sprintf("%-*s", max(listW-30, 8), name)) + " " + where + "  " + status
 			rows = append(rows, m.mark(fmt.Sprintf("mcp:%d", i), line))
 		}
 	}
@@ -691,6 +702,7 @@ func (m *Model) serverDetail(s mcp.Server, w, h int) string {
 		cursor = sCyan.Render("[✓]")
 	}
 	lines = append(lines, row("enabled", m.mark("key:1", claude+" "+agentLabel("claude"))+"   "+m.mark("key:2", cursor+" "+agentLabel("cursor"))))
+	lines = append(lines, m.mark("key:a", m.trustLine(s.Name, w)))
 	if s.Error != "" {
 		lines = append(lines, "", wrap.Render(sRose.Render("✗ "+trunc(s.Error, w*3))))
 	}
@@ -919,6 +931,8 @@ func (m *Model) mcpExternalKey(key string, e mcp.External) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	switch key {
+	case "a":
+		m.toggleTrust(e.Name)
 	case "t", "enter":
 		st.busy[e.Name] = "testing"
 		return m, runCmd(e.Server, "probe-ext")
@@ -989,6 +1003,26 @@ func (m *Model) externalDetail(e mcp.External, w, h int) string {
 	if s.Error != "" {
 		lines = append(lines, "", wrap.Render(sRose.Render("✗ "+s.Error)))
 	}
-	lines = append(lines, "", hints(w, m.chip("t", "t", "test"), m.chip("i", "i", "import into Seraph")))
+	lines = append(lines, "", m.trustLine(e.Name, w), "", hints(w, m.chip("t", "t", "test"), m.chip("i", "i", "import into Seraph"), m.chip("a", "a", "trust")))
 	return lipgloss.NewStyle().Width(w).MaxHeight(h).Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) toggleTrust(name string) {
+	on := !mcp.IsTrusted(m.mgr.Store(), name)
+	if err := mcp.SetTrusted(m.mgr.Store(), name, on); err != nil {
+		m.setFlash(err.Error(), true)
+		return
+	}
+	if on {
+		m.setFlash("⚡ "+name+" trusted: new and resumed workers use its tools without asking (not read-only roles)", false)
+	} else {
+		m.setFlash(name+": workers ask again (confirm mode) or are refused (safe mode)", false)
+	}
+}
+
+func (m *Model) trustLine(name string, w int) string {
+	if mcp.IsTrusted(m.mgr.Store(), name) {
+		return lipgloss.NewStyle().Width(w).Render(sGold.Render("⚡ trusted: ") + sDim.Render("workers use its tools without asking ("+mcp.ToolPattern(name)+")"))
+	}
+	return lipgloss.NewStyle().Width(w).Render(sFaint.Render("workers: safe mode refuses its tools, confirm mode asks you · a trusts it"))
 }

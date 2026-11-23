@@ -802,3 +802,38 @@ func TestMCPExternalRows(t *testing.T) {
 		t.Error("local-scope servers must warn that workers miss them")
 	}
 }
+
+func TestTrustAndWorkerMode(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h, m.scr = 150, 44, scrMCP
+	m.mcp.tab, m.mcp.sel = 0, 3
+	m.handleKey(keyMsg("a"))
+	if !mcp.IsTrusted(m.mgr.Store(), "penpot") {
+		t.Fatal("a trusts the selected external server")
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "penpot ⚡") || !strings.Contains(v, "mcp__penpot") {
+		t.Fatalf("trusted servers are marked:\n%s", v)
+	}
+	m.handleKey(keyMsg("a"))
+	if mcp.IsTrusted(m.mgr.Store(), "penpot") {
+		t.Fatal("a again untrusts")
+	}
+	m.scr = scrBoard
+	m.openDetail("s00000")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	if s, _ := m.mgr.Get("s00000"); s.Approval != "confirm" {
+		t.Fatalf("ctrl+y switches the worker to confirm, got %s", s.Approval)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	if s, _ := m.mgr.Get("s00000"); s.Approval != "safe" {
+		t.Fatalf("a shared-dir worker skips yolo, got %s", s.Approval)
+	}
+	m.stats.permissions = []store.Permission{{ID: "pm", SessionID: "s00000", Tool: "mcp__penpot__execute_code", Input: map[string]any{"code": "penpot.createRectangle()"}}}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"MCP penpot · execute_code", "penpot.createRectangle()", "c → a"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("MCP permission modal lacks %q", want)
+		}
+	}
+}

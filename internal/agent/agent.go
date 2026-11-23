@@ -64,6 +64,16 @@ type Spec struct {
 	ApproveMCPs  bool
 	AddDirs      []string
 	Permit       []string
+	AllowTools   []string
+}
+
+func withAllowed(base string, extra []string) string {
+	parts := []string{}
+	if base != "" {
+		parts = append(parts, base)
+	}
+	parts = append(parts, extra...)
+	return strings.Join(parts, ",")
 }
 
 const PermitTool = "mcp__seraph_permit__approve"
