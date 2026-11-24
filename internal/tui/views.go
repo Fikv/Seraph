@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"seraph/internal/workspace"
 	"strings"
 	"time"
 
@@ -149,17 +150,19 @@ func (m *Model) boardView() string {
 	}
 
 	keys := hints(m.w,
-		m.chip("m", "☰", "menu"), m.chip("n", "n", "summon"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("o", "o", "notes"), m.chip("v", "v", "diff"), m.chip("c", "c", "mcp"),
+		m.chip("m", "☰", "menu"), m.chip("N", "N", "orchestrator"), m.chip("n", "n", "worker"), m.chip("p", "p", "plan"), m.chip("enter", "⏎", "open"), m.chip("g", "g", "project"), m.chip("t", "t", "todo"), m.chip("o", "o", "notes"), m.chip("v", "v", "diff"), m.chip("c", "c", "mcp"),
 		m.chip("r", "r", "resume"), m.chip("x", "x", "stop"), m.chip("d", "d", "release"),
 		m.chip("a", "a", "agent"), m.chip("y", "y", "mode"), m.chip("q", "q", "quit"))
 	return top + "\n" + lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body) + "\n" + m.flashLine() + "\n" + keys
 }
 
 func (m *Model) emptyView(h int) string {
+	wrap := lipgloss.NewStyle().Width(max(min(m.w-4, 90), 20)).Align(lipgloss.Center)
 	msg := lipgloss.JoinVertical(lipgloss.Center,
 		sGold.Render(spinNow(false)+"  the heavens are quiet  "+spinNow(true)),
 		"",
-		sDim.Render("press ")+sGold.Render("n")+sDim.Render(" to summon a worker or ")+sGold.Render("p")+sDim.Render(" to divine a plan"),
+		wrap.Render(sDim.Render("press ")+sGold.Render("N")+sDim.Render(" for an orchestrator that plans, delegates to a team and lands the work on your branch")),
+		wrap.Render(sDim.Render("or ")+sGold.Render("n")+sDim.Render(" for a single worker in its own worktree · ")+sGold.Render("p")+sDim.Render(" to divine a plan")),
 	)
 	return lipgloss.Place(m.w, h, lipgloss.Center, lipgloss.Center, msg)
 }
@@ -314,9 +317,15 @@ func (m *Model) detailView() string {
 	if tl := m.teamLine(s); tl != "" {
 		where = tl + sDim.Render("  ·  ") + where
 	}
+	if s.Role == "orchestrator" && !s.Worktree {
+		where = m.teamLine(s) + sDim.Render("  ·  ") + sDim.Render("in your checkout on ") + sGoldB.Render(s.Branch) + sDim.Render(" (work lands there)")
+	}
 	info3 := m.flashLine()
 	if info3 == "" && s.Error != "" && s.Status != store.StatusWorking {
 		info3 = sRose.Render("✗ " + trunc(s.Error, m.w-3))
+	}
+	if info3 == "" && s.TeamID == "" && s.Role == "" && s.Turns >= 5 {
+		info3 = sFaint.Render(trunc("long conversation with one worker? N starts an orchestrator that delegates to a team, keeps TEAM.md and lands on your branch", m.w))
 	}
 
 	selLabel := "select text"
@@ -516,8 +525,17 @@ func renderTranscript(evs []agent.Event, agentName string, width int) string {
 }
 
 func (m *Model) targetLine() string {
-	if m.spawnRepo() == "" {
+	repo := m.spawnRepo()
+	if repo == "" {
 		return sRose.Render("no git repo: workers share " + m.opt.Dir)
+	}
+	if m.composeTeam {
+		branch := workspace.CurrentBranch(repo)
+		line := sDim.Render("works in your checkout ") + sIvory.Render(tildeHome(repo)) + sDim.Render(" · lands on ") + sGoldB.Render(branch)
+		if d, _ := workspace.Dirty(repo); d != "" {
+			line += sGold.Render("  ⚠ uncommitted changes: Seraph will not commit over them")
+		}
+		return line
 	}
 	return sDim.Render("each worker gets its own worktree off ") + sLavender.Render(m.repoText)
 }
@@ -525,12 +543,25 @@ func (m *Model) targetLine() string {
 func (m *Model) composeView(title, submit string) string {
 	opts := sDim.Render("model ") + m.chip("tab", "tab", "") + " " + m.mark("key:tab", m.modelLabel()) +
 		sDim.Render("     mode ") + m.chip("ctrl+y", "ctrl+y", "") + " " + m.mark("key:ctrl+y", approvalLabel(string(m.opt.Approval)))
+	kind := sGoldB.Render("◉ worker") + sDim.Render(" one agent, own worktree   ") + sFaint.Render("○ orchestrator")
+	if m.composeTeam {
+		kind = sFaint.Render("○ worker   ") + sGoldB.Render("◉ orchestrator") + sDim.Render(" plans, delegates to subagents, remembers (TEAM.md)")
+	}
+	limits := m.limitsLine(m.modalWidth() - 4)
+	if m.scr == scrNew {
+		toggle := m.chip("ctrl+o", "ctrl+o", "") + " " + m.mark("key:ctrl+o", kind)
+		if m.h < 26 {
+			limits = toggle
+		} else {
+			opts = toggle + "\n" + opts
+		}
+	}
 	body := strings.Join([]string{
 		m.ta.View(),
 		"",
 		opts,
-		m.targetLine(),
-		m.limitsLine(m.modalWidth() - 4),
+		lipgloss.NewStyle().MaxWidth(m.modalWidth() - 4).Render(m.targetLine()),
+		lipgloss.NewStyle().MaxWidth(m.modalWidth() - 4).Render(limits),
 		"",
 		hints(m.modalWidth()-4, m.chip("enter", "⏎", submit), m.chip("alt+enter", "alt+⏎", "newline"), m.chip("esc", "esc", "cancel")),
 	}, "\n")

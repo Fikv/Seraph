@@ -11,6 +11,7 @@ import (
 	"seraph/internal/agent"
 	"seraph/internal/store"
 	"seraph/internal/team"
+	"seraph/internal/workspace"
 )
 
 const roleOrchestrator = "orchestrator"
@@ -24,6 +25,16 @@ type TeamOpts struct {
 	Agent     string
 	Model     string
 	Approval  agent.Approval
+	Worktree  bool
+}
+
+func (m *Manager) CheckoutBusy(repo string) (store.Session, bool) {
+	for _, s := range m.Sessions() {
+		if !s.Worktree && s.Dir == repo && (s.Status == store.StatusWorking || s.Status == store.StatusQueued) && m.Active(s.ID) {
+			return s, true
+		}
+	}
+	return store.Session{}, false
 }
 
 func (m *Manager) StartTeam(o TeamOpts) (string, error) {
@@ -42,10 +53,21 @@ func (m *Manager) StartTeam(o TeamOpts) (string, error) {
 	if err := m.st.SetSetting(team.DirSetting+id, dir); err != nil {
 		return "", err
 	}
-	return m.Spawn(SpawnOpts{
+	so := SpawnOpts{
 		ID: id, Title: "Orchestrator: " + titleFrom(o.Goal), Task: o.Goal, Agent: firstNonEmpty(o.Agent, "claude"), Model: o.Model,
 		Approval: o.Approval, Repo: o.Repo, Dir: o.Dir, ProjectID: o.ProjectID, Role: roleOrchestrator, TeamID: id,
-	})
+	}
+	if !o.Worktree {
+		if busy, ok := m.CheckoutBusy(o.Repo); ok {
+			return "", fmt.Errorf("%s is already working in your checkout (%s); wait for it or stop it", busy.Title, busy.ID)
+		}
+		branch := workspace.CurrentBranch(o.Repo)
+		if branch == "" || branch == "HEAD" {
+			return "", errors.New("your checkout is not on a branch (detached HEAD): check out the branch the work should land on")
+		}
+		so.Shared, so.Dir, so.Branch, so.Base = true, o.Repo, branch, branch
+	}
+	return m.Spawn(so)
 }
 
 func (m *Manager) teamDir(id, goal, projectID string) string {
@@ -71,7 +93,11 @@ func (m *Manager) teamSystem(s store.Session) (string, []string, bool) {
 	}
 	claude := s.Agent == "claude"
 	if s.Role == roleOrchestrator {
-		return fmt.Sprintf(orchestratorPrompt, branchOr(s.Branch), dir), dirs, claude
+		landing := orchestratorWorktree
+		if !s.Worktree {
+			landing = fmt.Sprintf(orchestratorCheckout, s.Branch, s.Dir)
+		}
+		return fmt.Sprintf(orchestratorPrompt, branchOr(s.Branch), dir) + "\n" + landing, dirs, claude
 	}
 	parent := "the orchestrator"
 	if p, ok := m.Get(s.ParentID); ok {

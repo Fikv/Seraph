@@ -66,6 +66,13 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlR}
 	case "ctrl+y":
 		return tea.KeyMsg{Type: tea.KeyCtrlY}
+	case "ctrl+o":
+		return tea.KeyMsg{Type: tea.KeyCtrlO}
+	case "ctrl+l":
+		return tea.KeyMsg{Type: tea.KeyCtrlL}
+	}
+	if len(s) == 6 && strings.HasPrefix(s, "ctrl+") && s[5] >= 'a' && s[5] <= 'z' {
+		return tea.KeyMsg{Type: tea.KeyType(int(tea.KeyCtrlA) + int(s[5]-'a'))}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
