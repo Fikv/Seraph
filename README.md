@@ -127,9 +127,15 @@ Cards show where each worker stands: `✓ validated`, `✗ validation failed`, `
   where the plan, decisions, spawns and merges are recorded; agents can message each other
 - for a big, well-defined feature it can start a mission (with your gates) and merge it later
 
+The orchestrator works **directly in your checkout** on the branch you have checked out
+(for example `develop`), so its work and its team's merges land there: Seraph commits its
+changes after each turn, but only if your checkout was clean when the turn started, and only
+one agent works in a checkout at a time. Subagents still get their own worktrees. It pushes
+only when you ask. In the new-task form, `ctrl+o` switches between a worker and an
+orchestrator.
+
 `T` on its card or `ctrl+l` in any team member's window shows the live tree: who works,
-on what model, and whether their work is merged. Release the orchestrator's branch with
-`w` as usual. The orchestrator runs on Claude Code; Cursor subagents get the team context
+on what model, and whether their work is merged. The orchestrator runs on Claude Code; Cursor subagents get the team context
 in their prompt but not the team tools. The board (TUI) must be open while the team works.
 
 ## Missions: a team in a tree

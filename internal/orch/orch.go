@@ -567,6 +567,12 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		}
 	}
 
+	checkoutLead := snapshot.Role == roleOrchestrator && !snapshot.Worktree && snapshot.Branch != "" && spec.Approval != agent.ApprovalReadOnly && !ask
+	cleanAtStart := false
+	if checkoutLead {
+		dirty, err := workspace.Dirty(snapshot.Dir)
+		cleanAtStart = err == nil && dirty == ""
+	}
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -581,6 +587,18 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 		writes := snapshot.Worktree || (snapshot.MissionID != "" && snapshot.Branch != "" && spec.Approval != agent.ApprovalReadOnly)
 		if err == nil && !resultErr && writes && !ask {
 			m.commit(id, snapshot, prompt)
+		}
+		if err == nil && !resultErr && checkoutLead {
+			switch cur := workspace.CurrentBranch(snapshot.Dir); {
+			case cur != snapshot.Branch:
+				m.record(id, agent.Event{Kind: agent.KindError, Text: "your checkout is now on " + cur + ", not " + snapshot.Branch + ": Seraph did not commit", Time: time.Now()})
+			case cleanAtStart:
+				m.commit(id, snapshot, prompt)
+			default:
+				if d, _ := workspace.Dirty(snapshot.Dir); d != "" {
+					m.record(id, agent.Event{Kind: agent.KindSystem, Text: "not committed: your checkout had uncommitted changes before this turn, so the changes stay in the working tree for you to review", Time: time.Now()})
+				}
+			}
 		}
 
 		m.mu.Lock()
@@ -632,9 +650,12 @@ func (m *Manager) start(id, prompt, resume string, ask bool) {
 }
 
 func (m *Manager) commit(id string, s store.Session, prompt string) {
-	subject, body := s.Title, s.Task
+	subject, body := strings.TrimPrefix(s.Title, "Orchestrator: "), s.Task
 	if s.Turns > 1 {
 		subject, body = titleFrom(prompt), prompt
+	}
+	if strings.HasPrefix(strings.TrimSpace(prompt), "Seraph:") {
+		subject, body = "Integrate team results", ""
 	}
 	msg := subject
 	if b := strings.TrimSpace(body); b != "" && b != strings.TrimSpace(subject) {

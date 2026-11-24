@@ -359,7 +359,7 @@ func (s Server) merge(me store.Session, ref string) (string, error) {
 		}
 		branch, label = x.Branch, displayName(x)
 	}
-	if dirty, _ := workspace.DirtyTracked(me.Dir); dirty != "" {
+	if dirty, _ := workspace.DirtyTracked(me.Dir); dirty != "" && me.Worktree {
 		if _, err := workspace.CommitAll(me.Dir, "wip before merging "+label); err != nil {
 			return "", err
 		}

@@ -908,3 +908,34 @@ func TestTeamScreens(t *testing.T) {
 		t.Fatalf("esc returns to the orchestrator window: %v %s", m.scr, m.openID)
 	}
 }
+
+func TestChipKeysRoundTrip(t *testing.T) {
+	for _, k := range []string{"ctrl+g", "ctrl+l", "ctrl+n", "ctrl+o", "ctrl+r", "ctrl+t", "ctrl+x", "ctrl+y", "enter", "esc", "tab", "N", "w"} {
+		if got := keyMsg(k).String(); got != k {
+			t.Errorf("chip %q produces %q", k, got)
+		}
+	}
+}
+
+func TestOrchestratorIsVisible(t *testing.T) {
+	zone.NewGlobal()
+	m := testModel(t)
+	m.w, m.h, m.scr = 160, 44, scrBoard
+	if !strings.Contains(ansi.Strip(m.View()), "N  orchestrator") {
+		t.Fatal("the board hints must offer the orchestrator")
+	}
+	m.handleKey(keyMsg("n"))
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "◉ worker") || !strings.Contains(v, "○ orchestrator") {
+		t.Fatalf("the worker form must offer the orchestrator:\n%s", v)
+	}
+	m.handleKey(keyMsg("ctrl+o"))
+	v = ansi.Strip(m.View())
+	if !m.composeTeam || !strings.Contains(v, "◉ orchestrator") || !strings.Contains(v, "lands on") {
+		t.Fatalf("ctrl+o switches to the orchestrator and shows where work lands:\n%s", v)
+	}
+	m.handleKey(keyMsg("esc"))
+	if m.composeTeam {
+		t.Fatal("esc resets the choice")
+	}
+}

@@ -776,6 +776,15 @@ func (m *Model) composeKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+y":
 		m.toggleApproval()
 		return m, nil
+	case "ctrl+o":
+		if m.scr == scrNew {
+			if !m.composeTeam && m.spawnRepo() == "" {
+				m.setFlash("an orchestrator needs a git repository", true)
+				return m, nil
+			}
+			m.composeTeam = !m.composeTeam
+		}
+		return m, nil
 	case "enter":
 		text := strings.TrimSpace(m.ta.Value())
 		if text == "" {

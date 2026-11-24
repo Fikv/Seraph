@@ -28,6 +28,9 @@ func (crewDriver) Args(s agent.Spec) []string {
 		if d := os.Getenv("SERAPH_CREW_ORCH_SLEEP"); d != "" {
 			shell = "sleep " + d + "\n"
 		}
+		if f := os.Getenv("SERAPH_CREW_ORCH_WRITE"); f != "" {
+			shell += "echo lead >> " + f + "\n"
+		}
 	}
 	if mm := crewName.FindStringSubmatch(s.SystemPrompt); mm != nil {
 		name := mm[1]
@@ -219,6 +222,86 @@ func TestOrchestratorTeam(t *testing.T) {
 	}
 	if _, err := call(members["api"].ID, "start_mission", map[string]any{"goal": "x"}); err == nil {
 		t.Fatal("only the orchestrator starts missions")
+	}
+	m.StopAll()
+}
+
+func TestOrchestratorLandsInCheckout(t *testing.T) {
+	agent.Register("crew", crewDriver{})
+	m, _, _, repo := missionEnv(t)
+	m.StartTeamLoop()
+	head := func() string { return strings.TrimSpace(gitOut(t, repo, "rev-parse", "HEAD")) }
+	before := head()
+	t.Setenv("SERAPH_CREW_ORCH_WRITE", "lead.txt")
+	t.Setenv("SERAPH_CREW_ORCH_SLEEP", "1")
+	oid, err := m.StartTeam(TeamOpts{Goal: "write lead.txt", Repo: repo, ProjectID: "p1", Agent: "crew", Approval: agent.ApprovalSafe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, _ := m.Get(oid)
+	if o.Worktree || o.Dir != repo || o.Branch != "main" {
+		t.Fatalf("the lead works in the user's checkout on main: %+v", o)
+	}
+	if _, err := m.StartTeam(TeamOpts{Goal: "second", Repo: repo, Agent: "crew", Approval: agent.ApprovalSafe}); err == nil || !strings.Contains(err.Error(), "already working in your checkout") {
+		t.Fatalf("one agent per checkout: %v", err)
+	}
+	if _, err := (team.Server{Store: m.Store(), SessionID: oid}).Call("spawn_agent", map[string]any{"name": "kid", "task": "x", "paths": []any{"k/**"}}); err != nil {
+		t.Fatal(err)
+	}
+	idle := func(id string) func() bool {
+		return func() bool {
+			s, _ := m.Get(id)
+			return !m.Active(id) && s.Status != store.StatusWorking && s.Status != store.StatusQueued
+		}
+	}
+	waitFor(t, "lead turn", idle(oid))
+	t.Setenv("SERAPH_CREW_ORCH_SLEEP", "")
+	if head() == before || gitOut(t, repo, "rev-parse", "--abbrev-ref", "HEAD") != "main\n" {
+		t.Fatal("the lead's work must be committed on main in the user's checkout")
+	}
+	if gitOut(t, repo, "status", "--porcelain") != "" {
+		t.Fatal("the checkout must be clean after the commit")
+	}
+	if subj := gitOut(t, repo, "log", "-5", "--format=%s"); strings.Contains(subj, "Orchestrator:") || !strings.Contains(subj, "write lead.txt") {
+		t.Fatalf("commits on the user's branch carry the request, not the role: %q", subj)
+	}
+	var kid store.Session
+	for _, x := range m.TeamMembers(oid) {
+		if x.AgentName == "kid" {
+			kid = x
+		}
+	}
+	waitFor(t, "kid", idle(kid.ID))
+	if kid.Base != "main" || !kid.Worktree {
+		t.Fatalf("subagents keep their own worktree off main: %+v", kid)
+	}
+	waitFor(t, "lead woken by kid", idle(oid))
+	if out, err := (team.Server{Store: m.Store(), SessionID: oid}).Call("merge_agent", map[string]any{"agent": "kid"}); err != nil {
+		t.Fatalf("merge into checkout: %v %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "k", "kid.txt")); err != nil {
+		t.Fatal("the child's work must land on main in the checkout")
+	}
+
+	os.WriteFile(filepath.Join(repo, "mine.txt"), []byte("user work in progress"), 0o644)
+	beforeDirty := head()
+	if err := m.Followup(oid, "one more"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "lead turn 3", idle(oid))
+	if head() != beforeDirty {
+		t.Fatal("with the user's uncommitted changes present, Seraph must not commit")
+	}
+	if !strings.Contains(gitOut(t, repo, "status", "--porcelain"), "mine.txt") {
+		t.Fatal("the user's file must stay untouched and uncommitted")
+	}
+	evs, _ := m.Log(oid)
+	saw := false
+	for _, ev := range evs {
+		saw = saw || strings.Contains(ev.Text, "not committed: your checkout had uncommitted changes")
+	}
+	if !saw {
+		t.Fatal("the transcript must say why nothing was committed")
 	}
 	m.StopAll()
 }
